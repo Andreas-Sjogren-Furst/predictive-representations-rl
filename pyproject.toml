@@ -1,0 +1,14 @@
+[project]
+name = "predictive-representations-rl"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Andreas-Sjogren-Furst", email = "91537952+Andreas-Sjogren-Furst@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
