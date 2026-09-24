@@ -7,8 +7,19 @@ authors = [
     { name = "Andreas-Sjogren-Furst", email = "91537952+Andreas-Sjogren-Furst@users.noreply.github.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "numpy>=2.5.3",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["third_party", ".venv", ".git"]

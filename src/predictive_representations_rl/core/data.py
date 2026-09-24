@@ -7,10 +7,10 @@ from typing import TypeAlias
 import numpy as np
 
 
-Observation: TypeAlias = np.array | Mapping[str, np.array]
+Observation: TypeAlias = np.ndarray | Mapping[str, np.ndarray]
 
 def observation_length(observation: Observation) -> int:
-    if isinstance(observation, np.array):
+    if isinstance(observation, np.ndarray):
         return len(observation)
 
     lengths = { len(value) for value in observation.values() }
