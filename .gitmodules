@@ -1,0 +1,6 @@
+[submodule "third_party/onestep-fb"]
+	path = third_party/onestep-fb
+	url = https://github.com/chongyi-zheng/onestep-fb.git
+[submodule "third_party/Offline_vs_Online_in_MBRL"]
+	path = third_party/Offline_vs_Online_in_MBRL
+	url = https://github.com/swsychen/Offline_vs_Online_in_MBRL.git
