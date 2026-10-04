@@ -46,7 +46,7 @@ def evaluate(policy: Policy, env: Environment, *, num_episodes: int, seed: int =
 
         while True:
             action, policy_state = policy.act(observation, policy_state, deterministic=True)
-            observation,reward,terminated,truncated = env.step(action)
+            observation, reward, terminated, truncated, _ = env.step(action)
 
             episode_return += float(reward)
             episode_length += 1

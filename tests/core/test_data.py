@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from predictive_representations_rl.core.data import (
     RepresentationDataset,
@@ -54,3 +55,18 @@ def test_task_dataset():
     )
 
     assert dataset.num_transitions == 10
+
+
+def test_rewarded_trajectory_rejects_mismatched_rewards():
+    trajectory = Trajectory(
+        observations=np.zeros((11, 4)),
+        actions=np.zeros((10, 2)),
+        terminated=np.zeros(10, dtype=bool),
+        truncated=np.zeros(10, dtype=bool),
+    )
+
+    with pytest.raises(ValueError):
+        RewardedTrajectory(
+            trajectory=trajectory,
+            rewards=np.ones(9),
+        )

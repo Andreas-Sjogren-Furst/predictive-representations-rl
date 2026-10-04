@@ -59,7 +59,7 @@ class RewardedTrajectory:
     trajectory: Trajectory
     rewards: np.ndarray
 
-    def __post__init__(self) -> None:
+    def __post_init__(self) -> None:
         if len(self.rewards) != self.trajectory.num_steps:
             raise ValueError("Rewards must contain one value per transition")
 
