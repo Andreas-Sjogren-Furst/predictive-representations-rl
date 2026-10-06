@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from predictive_representations_rl.analysis.base import factor_columns, load_extraction
-from predictive_representations_rl.analysis.linear_probe import LinearProbeAnalyzer, probe
+from predictive_representations_rl.analysis.linear_probe import LinearProbeAnalyzer, probe, skip_reason
 from predictive_representations_rl.analysis.pca import PCAAnalyzer, participation_ratio, pca
 
 RNG = np.random.default_rng(0)
@@ -43,7 +43,7 @@ def test_linear_probe_scores_signal_high_and_noise_low():
     assert probe(linear, meta["x"], "continuous", meta["episode"])["score"] > 0.99
     assert probe(noise, meta["x"], "continuous", meta["episode"])["score"] < 0.05
     room = probe(linear, meta["room"], "categorical", meta["episode"])
-    assert room["metric"] == "accuracy" and room["score"] > 0.95 and room["chance"] < 0.5
+    assert room["metric"] == "balanced_accuracy" and room["score"] > 0.95 and room["chance"] == 0.25
 
 
 def test_factor_columns_skip_bookkeeping_and_detect_classes():
@@ -51,6 +51,26 @@ def test_factor_columns_skip_bookkeeping_and_detect_classes():
 
     assert set(factors) == {"x", "y", "room"}
     assert factors["room"][1] == "categorical" and factors["x"][1] == "continuous"
+
+
+def test_rewards_become_binary_rewarded_labels():
+    reward = np.array([0.0, 1e-300, 0.002, 0.9])
+
+    factors = factor_columns({"reward_reach_goal": reward})
+
+    target, kind = factors["rewarded_reach_goal"]
+    assert kind == "categorical"
+    np.testing.assert_array_equal(target, [0, 0, 1, 1])
+
+
+def test_rare_or_constant_factors_are_skipped():
+    episodes = np.repeat(np.arange(20), 10)
+    rare = np.zeros(200, np.int64)
+    rare[:15] = 1  # 15 positives from 2 episodes
+
+    assert "class 1 has 15 probes from 2 episodes" == skip_reason(rare, "categorical", episodes)
+    assert skip_reason(np.zeros(200), "continuous", episodes) == "constant"
+    assert skip_reason(np.arange(200) % 2, "categorical", episodes) is None
 
 
 def test_load_extraction_keeps_only_per_probe_arrays(tmp_path):

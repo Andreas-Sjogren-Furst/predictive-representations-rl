@@ -198,7 +198,7 @@ def test_analyze_adds_the_observation_baseline_and_records_results(root):
 
     assert set(results) == {"pca", "linear_probe"}
     summary = json.loads((run.run_dir / "analysis" / "default" / "linear_probe" / "summary.json").read_text())
-    assert set(summary) == {"z", runner.BASELINE_REPRESENTATION}
+    assert set(summary) == {"z", runner.BASELINE_REPRESENTATION, "skipped_factors"}
     assert summary["z"]["x"] > 0.99  # the fake extraction is 2 * final observation
     assert set(json.loads((run.run_dir / "run.json").read_text())["analyses"]["default"]) == {"pca", "linear_probe"}
 

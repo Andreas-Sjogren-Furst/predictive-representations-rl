@@ -1,8 +1,9 @@
 """Linear probes: how well a linear readout of each representation recovers each ground-truth factor.
 
-Continuous factors: ridge regression, cross-validated R^2. Categorical factors: logistic regression, accuracy
-(with the majority-class rate as chance). Folds are split by episode when the probe set records it, because
-windows from the same episode overlap and would otherwise leak between train and test.
+Continuous factors: ridge regression, cross-validated R^2. Categorical factors (rooms, rewarded-or-not): class-balanced
+logistic regression, balanced accuracy, so chance is 1/k however imbalanced the classes are. Folds are split by
+episode when the probe set records it, because windows from the same episode overlap and would otherwise leak
+between train and test; categorical folds are also stratified by class.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from typing import Any
 import numpy as np
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression, RidgeCV
-from sklearn.model_selection import GroupKFold, KFold, cross_val_score
+from sklearn.model_selection import GroupKFold, KFold, StratifiedGroupKFold, StratifiedKFold, cross_val_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -24,28 +25,42 @@ from predictive_representations_rl.analysis import plotting
 from predictive_representations_rl.analysis.base import Analyzer, factor_columns
 
 NUM_FOLDS = 5
+# A class needs this many probes, from at least NUM_FOLDS episodes, to be probed; otherwise the factor is skipped.
+MIN_CLASS_SIZE = 20
 RIDGE_ALPHAS = np.logspace(-3, 3, 13)
 FIELDS = ["representation", "factor", "kind", "metric", "score", "score_std", "chance"]
 
 
+def skip_reason(target: np.ndarray, kind: str, groups: np.ndarray | None) -> str | None:
+    """Why a factor cannot be probed reliably, or None."""
+    if np.ptp(target) == 0:
+        return "constant"
+    if kind == "categorical":
+        for label in np.unique(target):
+            members = target == label
+            episodes = len(np.unique(groups[members])) if groups is not None else NUM_FOLDS
+            if members.sum() < MIN_CLASS_SIZE or episodes < NUM_FOLDS:
+                return f"class {label} has {members.sum()} probes from {episodes} episodes"
+    return None
+
+
 def probe(values: np.ndarray, target: np.ndarray, kind: str, groups: np.ndarray | None) -> dict[str, Any]:
-    if groups is not None and len(np.unique(groups)) >= NUM_FOLDS:
-        folds, split_groups = GroupKFold(n_splits=NUM_FOLDS), groups
-    else:
-        folds, split_groups = KFold(n_splits=NUM_FOLDS, shuffle=True, random_state=0), None
+    grouped = groups is not None and len(np.unique(groups)) >= NUM_FOLDS
 
     if kind == "categorical":
-        model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000))
-        metric = "accuracy"
-        chance = float(np.max(np.bincount(target - target.min())) / len(target))
+        folds = StratifiedGroupKFold(NUM_FOLDS, shuffle=True, random_state=0) if grouped else StratifiedKFold(NUM_FOLDS, shuffle=True, random_state=0)
+        model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000, class_weight="balanced"))
+        metric = "balanced_accuracy"
+        chance = 1.0 / len(np.unique(target))
     else:
+        folds = GroupKFold(NUM_FOLDS) if grouped else KFold(NUM_FOLDS, shuffle=True, random_state=0)
         model = make_pipeline(StandardScaler(), RidgeCV(alphas=RIDGE_ALPHAS))
         metric = "r2"
         chance = 0.0
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
-        scores = cross_val_score(model, values, target, cv=folds, groups=split_groups, scoring=metric)
+        scores = cross_val_score(model, values, target, cv=folds, groups=groups if grouped else None, scoring=metric)
 
     return {"metric": metric, "score": float(scores.mean()), "score_std": float(scores.std()), "chance": chance}
 
@@ -56,7 +71,13 @@ class LinearProbeAnalyzer(Analyzer):
     def run(self, representations: dict[str, np.ndarray], metadata: dict[str, np.ndarray], output_dir: Path) -> dict[str, Any]:
         output_dir.mkdir(parents=True, exist_ok=True)
         groups = metadata.get("episode")
-        factors = {name: column for name, column in factor_columns(metadata).items() if np.ptp(column[0]) > 0}
+        factors, skipped = {}, {}
+        for name, (target, kind) in factor_columns(metadata).items():
+            reason = skip_reason(target, kind, groups)
+            if reason is None:
+                factors[name] = (target, kind)
+            else:
+                skipped[name] = reason
 
         rows = []
         for rep_name, values in representations.items():
@@ -67,9 +88,10 @@ class LinearProbeAnalyzer(Analyzer):
         write_rows(rows, output_dir / "linear_probe.csv")
         plot_scores(rows, output_dir / "linear_probe.png", "Linear probe: factor recovered from each representation")
 
-        summary = {rep: {} for rep in representations}
+        summary: dict[str, Any] = {rep: {} for rep in representations}
         for row in rows:
             summary[row["representation"]][row["factor"]] = round(row["score"], 4)
+        summary["skipped_factors"] = skipped
         (output_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         return summary
 
@@ -108,11 +130,11 @@ def plot_scores(rows: list[dict[str, Any]], path: Path, title: str) -> None:
                 text = f"{grid[i, j]:.2f}" if grid[i, j] >= 0 else "<0"  # exact values are in the CSV
                 ax.text(j, i, text, ha="center", va="center", fontsize=7, color="#ffffff" if dark else plotting.INK)
     ax.set_xticks(range(len(factors)))
-    ax.set_xticklabels([f"{f} (acc)" if kinds[f] == "categorical" else f for f in factors], rotation=45, ha="right")
+    ax.set_xticklabels([f"{f} (bal. acc)" if kinds[f] == "categorical" else f for f in factors], rotation=45, ha="right")
     ax.set_yticks(range(len(representations)))
     ax.set_yticklabels(representations)
     ax.grid(False)
-    ax.set_title(f"{title}\nR² for continuous factors, accuracy for (acc); <0 = worse than predicting the mean", fontsize=10)
+    ax.set_title(f"{title}\nR² for continuous factors (<0: worse than the mean), balanced accuracy for (bal. acc)", fontsize=10)
     fig.colorbar(image, ax=ax, shrink=0.8, label="score")
     fig.tight_layout()
     fig.savefig(path, dpi=150)

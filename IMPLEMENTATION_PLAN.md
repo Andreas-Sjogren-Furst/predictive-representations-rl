@@ -303,7 +303,8 @@ python main.py --env_name=exorl-rnd-point_mass_maze --agent=agents/onestep_fb.py
    - DreamerV3: `deter` (h), `stoch` (z, flattened one-hot), `model_state` (h,z) at the final step of the posterior filtered over the window (prev action a_{t-1}, learned initial state at t=0). Matches the repo's own `forward_obs_pass` within sampling noise. State encoders only.
 6. ✅ Analysis: `prl analyze <configs...> [--analysis pca,linear_probe]` writes `analysis/<probe set>/<analyser>/` per run, and with several runs a combined `runs/<env>/analysis/<probe set>/linear_probe_comparison.{csv,png}`. The raw probe observation is always included as a baseline representation.
    - PCA: explained variance (components for 90/95%, participation ratio), and maps of PC1-3 over (x, y).
-   - Linear probes: ridge R² for continuous factors, logistic accuracy (with majority-class chance) for categorical ones; 5-fold CV split by episode, since overlapping windows from one episode would leak.
+   - Linear probes: ridge R² for continuous factors; class-balanced logistic regression scored by balanced accuracy (chance 1/k) for categorical ones (room, and `rewarded_<task>` = reward > 1e-6, since rewards are mostly 0). 5-fold CV split by episode (stratified for classes), since overlapping windows from one episode would leak. Classes with < 20 probes or from < 5 episodes are skipped and listed in the summary.
+   - Untrained control: both extraction scripts also write every representation from the network at initialisation (same architecture, config and seed) as `<name>_untrained`, so it appears next to the trained one in every analysis.
 
 **Done when:** `prl run` works for both configs on point_mass_maze, each run directory contains `run.json`, `metrics.jsonl` and probe representations, and `prl analyze` produces PCA plots and linear-probe scores for FB `B`/`F` and Dreamer `h`/`z` on the same probe set.
 
@@ -318,8 +319,7 @@ python main.py --env_name=exorl-rnd-point_mass_maze --agent=agents/onestep_fb.py
 - **Different experience by default**: FB trains on ~5M RND transitions; Dreamer online collects its own. Recorded, not equalized, in milestone 1.
 - **Dreamer representations are stochastic**: z is sampled from the posterior and h depends on those samples. On the tiny debug model the run-to-run noise in h was ~60% of its spread across probes. Check on the trained model; if still large, add a deterministic option (posterior mode / logits) or average several samples.
 - **Dreamer action alignment in extraction** is consistent with the repo's own pass but could not be discriminated on the debug model (it barely uses actions); re-check on a trained checkpoint.
-- **Linear probes need an untrained control**: on the 2k-step FB smoke model, B and F already recover position almost perfectly (R² ≈ 0.99), as a random MLP of the state would. To show what training adds, compare against the same network at initialisation (or a random projection of the observation).
-- **Sparse-reward factors** (`reward_<task>`) give unstable negative R² under regression; treat them as classification (reward > 0) or drop them.
+- **Linear decodability of the state is not evidence of learning**: the untrained FB networks recover position as well as trained ones (R² ≈ 0.99 on the smoke run). Compare every representation with its `_untrained` control, and lean on analyses that test structure beyond the state (goal distances, rewards, PCA geometry, later CKA/RSA).
 - `core/backend.py` (in-process `PredictiveRLBackend`) does not fit the subprocess design; keep until the adapters replace it, then remove.
 
 ## 12. Later

@@ -15,6 +15,9 @@ import numpy as np
 NON_FACTORS = frozenset({"source_index", "episode"})
 # Integer metadata with at most this many distinct values is treated as a class label.
 MAX_CLASSES = 20
+# Per-task rewards are probed as "rewarded or not". Tolerance-style rewards decay smoothly and only underflow to
+# exactly 0 far from the goal, so a tiny threshold separates near-goal states from the rest.
+REWARD_THRESHOLD = 1e-6
 
 
 class Analyzer(ABC):
@@ -45,7 +48,8 @@ def load_extraction(probe_dir: Path) -> tuple[dict[str, np.ndarray], dict[str, n
 def factor_columns(metadata: dict[str, np.ndarray]) -> dict[str, tuple[np.ndarray, str]]:
     """Metadata columns to probe for, each tagged 'categorical' or 'continuous'.
 
-    Ordered: environment factors first, then per-task rewards, then the step within the episode.
+    `reward_<task>` columns become binary `rewarded_<task>` labels (reward > REWARD_THRESHOLD): rewards are mostly 0,
+    which makes regression R^2 meaningless. Ordered: environment factors, then rewards, then the step in the episode.
     """
     def order(key: str) -> int:
         return 2 if key == "step" else 1 if key.startswith("reward_") else 0
@@ -53,6 +57,9 @@ def factor_columns(metadata: dict[str, np.ndarray]) -> dict[str, tuple[np.ndarra
     factors = {}
     for key, values in sorted(metadata.items(), key=lambda item: order(item[0])):
         if key in NON_FACTORS or values.ndim != 1:
+            continue
+        if key.startswith("reward_"):
+            factors["rewarded_" + key.removeprefix("reward_")] = ((values > REWARD_THRESHOLD).astype(np.int64), "categorical")
             continue
         categorical = np.issubdtype(values.dtype, np.integer) and len(np.unique(values)) <= MAX_CLASSES
         factors[key] = (values, "categorical" if categorical else "continuous")

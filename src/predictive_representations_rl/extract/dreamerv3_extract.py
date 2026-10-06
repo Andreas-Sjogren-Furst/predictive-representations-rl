@@ -7,7 +7,7 @@ The RSSM posterior is filtered over each probe window, as during training: at st
 latent state, the previous action a_{t-1}, and the observation o_t. The first step starts from the model's learned
 initial state with a zero action (is_first). The representation is the posterior at the final step.
 
-Writes to --out:
+Writes to --out (and the same files with an `_untrained` suffix, from the model at initialisation):
     deter.npz           values [N, deter]           h, the GRU state
     stoch.npz           values [N, stoch * classes] z, the one-hot categorical sample, flattened
     model_state.npz     values [N, deter + stoch * classes]  concat(h, z), the actor/critic input
@@ -44,10 +44,13 @@ def load_agent(logdir, checkpoint):
     env.close()
 
     agent = agt.Agent(obs_space, act_space, embodied.Counter(), config)
+    return agent, obs_space, config
+
+
+def restore(agent, checkpoint):
     saved = embodied.Checkpoint()
     saved.agent = agent
     saved.load(checkpoint, keys=["agent"])
-    return agent, obs_space, config
 
 
 def split_observations(flat, obs_space):
@@ -83,6 +86,17 @@ def filter_posterior(agent, observations, actions, obs_space):
     return {key: np.asarray(value) for key, value in state.items()}
 
 
+def representations(agent, observations, actions, obs_space):
+    state = filter_posterior(agent, observations, actions, obs_space)
+    deter = state["deter"]
+    stoch = state["stoch"].reshape(len(deter), -1)
+    return {
+        "deter": {"values": deter},
+        "stoch": {"values": stoch, "logit": state["logit"]},
+        "model_state": {"values": np.concatenate([deter, stoch], axis=-1)},
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
@@ -91,30 +105,24 @@ def main():
     args = parser.parse_args()
 
     agent, obs_space, config = load_agent(args.checkpoint.parent, args.checkpoint)
-
     with np.load(args.probes) as probes:
         observations, actions = probes["observations"], probes["actions"]
 
-    state = filter_posterior(agent, observations, actions, obs_space)
-    deter = state["deter"]
-    stoch = state["stoch"].reshape(len(deter), -1)
-    model_state = np.concatenate([deter, stoch], axis=-1)
+    # The untrained control first (same architecture, config and seed, at initialisation), then the checkpoint.
+    outputs = {f"{name}_untrained": arrays for name, arrays in representations(agent, observations, actions, obs_space).items()}
+    restore(agent, args.checkpoint)
+    outputs.update(representations(agent, observations, actions, obs_space))
 
     args.out.mkdir(parents=True, exist_ok=True)
-    np.savez(args.out / "deter.npz", values=deter)
-    np.savez(args.out / "stoch.npz", values=stoch, logit=state["logit"])
-    np.savez(args.out / "model_state.npz", values=model_state)
+    for name, arrays in outputs.items():
+        np.savez(args.out / f"{name}.npz", **arrays)
 
     info = {
         "checkpoint": str(args.checkpoint),
         "task": config.task,
         "observation_keys": split_observations(observations[:1, :1], obs_space)[1],
         "window_length": int(observations.shape[1]),
-        "representations": {
-            "deter": list(deter.shape),
-            "stoch": list(stoch.shape),
-            "model_state": list(model_state.shape),
-        },
+        "representations": {name: list(arrays["values"].shape) for name, arrays in outputs.items()},
     }
     (args.out / "extract_info.json").write_text(json.dumps(info, indent=2) + "\n")
     print(json.dumps(info))
