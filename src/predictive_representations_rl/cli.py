@@ -10,7 +10,9 @@ from predictive_representations_rl.core.config import load_config
 from predictive_representations_rl.core.runtime import find_project_root
 from predictive_representations_rl.runner import (
     RunError,
+    analyze,
     build_probe_set,
+    compare_linear_probes,
     command_line,
     extract,
     resolve,
@@ -136,6 +138,40 @@ def _extract(path: Path, seeds: list[int] | None, probe_name: str, cpu: bool) ->
     return 1 if failed else 0
 
 
+def _analyze(paths: list[Path], seeds: list[int] | None, probe_name: str, analyses: str | None) -> int:
+    root = find_project_root()
+    names = analyses.split(",") if analyses else None
+    runs = []
+    try:
+        for path in paths:
+            config = load_config(path)
+            runs += [resolve(config, seed, root, path.resolve(), allow_missing=True) for seed in (seeds or config.seeds)]
+    except (KeyError, ValueError, OSError, RunError) as error:
+        print(f"✗ {error}")
+        return 1
+
+    if len({run.env.name for run in runs}) > 1:
+        print("✗ all configs must use the same environment (they share its probe set)")
+        return 1
+
+    done, failed = [], False
+    for run in runs:
+        try:
+            results = analyze(run, probe_name, names)
+        except RunError as error:
+            print(f"✗ {run.run_dir}: {error}")
+            failed = True
+            continue
+        done.append(run)
+        for name, out in results.items():
+            print(f"✓ {name}: {out}")
+
+    if len(done) > 1 and (names is None or "linear_probe" in names):
+        print(f"✓ comparison: {compare_linear_probes(done, probe_name)}")
+
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="prl", description="Predictive-representations experiment harness.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -167,8 +203,16 @@ def main(argv: list[str] | None = None) -> int:
     extract_parser.add_argument("--probes", default="default", help="Probe set name.")
     extract_parser.add_argument("--cpu", action="store_true", help="Run extraction on CPU (JAX_PLATFORMS=cpu).")
 
+    analyze_parser = commands.add_parser("analyze", help="Analyse extracted representations (one or more configs).")
+    analyze_parser.add_argument("configs", nargs="+", type=Path)
+    analyze_parser.add_argument("--seed", type=int, action="append", dest="seeds")
+    analyze_parser.add_argument("--probes", default="default", help="Probe set name.")
+    analyze_parser.add_argument("--analysis", help="Comma-separated analyses (default: all): pca,linear_probe")
+
     args = parser.parse_args(argv)
 
+    if args.command == "analyze":
+        return _analyze(args.configs, args.seeds, args.probes, args.analysis)
     if args.command == "probes":
         return _probes(args.env, args.name, args.num, args.length, args.seed, args.force)
     if args.command == "extract":

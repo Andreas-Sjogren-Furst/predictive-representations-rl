@@ -5,8 +5,10 @@ runs/<env>/<algo>/<mode>[/<task>]/seed_<N>/
     train.log     stdout + stderr of the algorithm process
     native/       everything the algorithm wrote itself (logs, checkpoints, replay), untouched
     probes/<probe set>/<representation>.npz, metadata.npz, extract_info.json, extract.log
+    analysis/<probe set>/<analyser>/      per-run analysis outputs
 
 runs/<env>/probes/<probe set>.npz    shared probe inputs, built once per environment
+runs/<env>/analysis/<probe set>/     cross-run comparisons
 """
 
 from __future__ import annotations
@@ -207,6 +209,64 @@ def extract(run: ResolvedRun, probe_name: str = "default", environment: dict[str
     }
     _write_record(run, record)
     return record["extractions"][probe_name]
+
+
+# Added to every analysis as a reference point: what the raw probe state already gives a linear readout.
+BASELINE_REPRESENTATION = "observation (baseline)"
+
+
+def analyze(run: ResolvedRun, probe_name: str = "default", analyzer_names: list[str] | None = None) -> dict[str, Any]:
+    """Run analysers on a run's extracted representations; outputs go to analysis/<probe set>/<analyser>/."""
+    from predictive_representations_rl.analysis import ANALYZERS
+    from predictive_representations_rl.analysis.base import load_extraction
+
+    probe_dir = run.run_dir / "probes" / probe_name
+    if not (probe_dir / "metadata.npz").exists():
+        raise RunError(f"no extraction for probe set {probe_name!r} in {run.run_dir}; run `prl extract` first")
+
+    names = analyzer_names or list(ANALYZERS)
+    unknown = set(names) - set(ANALYZERS)
+    if unknown:
+        raise RunError(f"unknown analyses {sorted(unknown)}; available: {sorted(ANALYZERS)}")
+
+    representations, metadata = load_extraction(probe_dir)
+    representations[BASELINE_REPRESENTATION] = ProbeSet.load(probe_set_path(run.root, run.env, probe_name)).final_observations
+
+    results = {}
+    for name in names:
+        output_dir = run.run_dir / "analysis" / probe_name / name
+        ANALYZERS[name].run(representations, metadata, output_dir)
+        results[name] = str(output_dir)
+
+    record_path = run.run_dir / "run.json"
+    record = json.loads(record_path.read_text())
+    record.setdefault("analyses", {}).setdefault(probe_name, {}).update({name: {"at": _now(), "dir": out} for name, out in results.items()})
+    _write_record(run, record)
+    return results
+
+
+def compare_linear_probes(runs: list[ResolvedRun], probe_name: str = "default") -> Path:
+    """One table and heatmap of every run's linear-probe scores, rows labelled <algo>[/<task>]/seed_N: <representation>."""
+    from predictive_representations_rl.analysis.linear_probe import plot_scores, read_rows, write_rows
+
+    rows, baseline_done = [], False
+    for run in runs:
+        label = "/".join(filter(None, [run.config.algo, run.config.task, f"seed_{run.seed}"]))
+        for row in read_rows(run.run_dir / "analysis" / probe_name / "linear_probe" / "linear_probe.csv"):
+            if row["representation"] == BASELINE_REPRESENTATION:
+                if baseline_done:
+                    continue
+                rows.append(row)
+            else:
+                rows.append({**row, "representation": f"{label}: {row['representation']}"})
+        baseline_done = True
+
+    env = runs[0].env.name
+    output_dir = runs_dir(runs[0].root) / env / "analysis" / probe_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    write_rows(rows, output_dir / "linear_probe_comparison.csv")
+    plot_scores(rows, output_dir / "linear_probe_comparison.png", f"Linear probe on {env}: all runs")
+    return output_dir
 
 
 def _claim_run_dir(run: ResolvedRun, force: bool) -> None:

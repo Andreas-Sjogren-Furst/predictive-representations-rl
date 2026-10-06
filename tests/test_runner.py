@@ -181,6 +181,36 @@ def test_extract_writes_representations_and_records_them(root, monkeypatch):
     assert json.loads((run.run_dir / "run.json").read_text())["extractions"]["default"]["checkpoint"].endswith("model.ckpt")
 
 
+def test_analyze_adds_the_observation_baseline_and_records_results(root):
+    rng = np.random.default_rng(0)
+    observations = rng.uniform(-0.3, 0.3, (200, 3, 2)).astype(np.float32)
+    probe_set = ProbeSet(
+        observations=observations,
+        actions=np.zeros((200, 3, 1), np.float32),
+        metadata={"x": observations[:, -1, 0].astype(np.float64), "episode": np.repeat(np.arange(20), 10)},
+    )
+    run = runner.resolve(fake_config(), seed=0, root=root)
+    probe_set.save(runner.probe_set_path(root, run.env))
+    runner.run_locally(run)
+    runner.extract(run)
+
+    results = runner.analyze(run)
+
+    assert set(results) == {"pca", "linear_probe"}
+    summary = json.loads((run.run_dir / "analysis" / "default" / "linear_probe" / "summary.json").read_text())
+    assert set(summary) == {"z", runner.BASELINE_REPRESENTATION}
+    assert summary["z"]["x"] > 0.99  # the fake extraction is 2 * final observation
+    assert set(json.loads((run.run_dir / "run.json").read_text())["analyses"]["default"]) == {"pca", "linear_probe"}
+
+
+def test_analyze_needs_an_extraction(root):
+    run = runner.resolve(fake_config(), seed=0, root=root)
+    runner.run_locally(run)
+
+    with pytest.raises(runner.RunError, match="prl extract"):
+        runner.analyze(run)
+
+
 def test_extract_needs_a_probe_set(root):
     run = runner.resolve(fake_config(), seed=0, root=root)
     runner.run_locally(run)
