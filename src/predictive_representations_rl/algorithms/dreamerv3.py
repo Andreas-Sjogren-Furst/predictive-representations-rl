@@ -13,6 +13,6 @@ DREAMERV3 = AlgorithmSpec(
     representations=("deter", "stoch", "model_state"),
     stateful_representation=True,
     task_specific=True,
-    # Not set up yet on the HPC; the repo recommends its Singularity image instead.
-    runtime=Venv("third_party/Offline_vs_Online_in_MBRL/.venv"),
+    # Built by scripts/setup_dreamerv3_venv.sh (the repo itself recommends its Singularity image).
+    runtime=Venv(".venvs/dreamerv3"),
 )
