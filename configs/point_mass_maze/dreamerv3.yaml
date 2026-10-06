@@ -8,3 +8,5 @@ seeds: [0]
 budget:
   env_steps: 500_000
 overrides: {}
+resources:
+  walltime: "48:00"  # 500k env steps at train_ratio 512 can approach 24 h
