@@ -7,6 +7,11 @@ The RSSM posterior is filtered over each probe window, as during training: at st
 latent state, the previous action a_{t-1}, and the observation o_t. The first step starts from the model's learned
 initial state with a zero action (is_first). The representation is the posterior at the final step.
 
+--posterior sample (default, as in training): z_t is sampled from the posterior, so h and z vary between
+extractions; the run-to-run noise is measured and reported in extract_info.json (`sampling_noise`).
+--posterior mode: z_t is the posterior's most likely class per categorical (one-hot argmax of the logits) and is
+fed forward as such, so h and z are deterministic.
+
 Writes to --out (and the same files with an `_untrained` suffix, from the model at initialisation):
     deter.npz           values [N, deter]           h, the GRU state
     stoch.npz           values [N, stoch * classes] z, the one-hot categorical sample, flattened
@@ -64,7 +69,14 @@ def split_observations(flat, obs_space):
     return dict(zip(keys, parts)), keys
 
 
-def filter_posterior(agent, observations, actions, obs_space):
+def posterior_mode(state):
+    """Replace the sampled z with the most likely class of each categorical (unimix keeps the argmax unchanged)."""
+    logit = np.asarray(state["logit"])
+    stoch = np.eye(logit.shape[-1], dtype=np.asarray(state["stoch"]).dtype)[logit.argmax(-1)]
+    return {**state, "stoch": stoch}
+
+
+def filter_posterior(agent, observations, actions, obs_space, posterior="sample"):
     """Run the posterior over windows [N, T]; return the final latent state."""
     num, length = observations.shape[:2]
     obs_dict, _ = split_observations(observations.astype(np.float32), obs_space)
@@ -81,13 +93,15 @@ def filter_posterior(agent, observations, actions, obs_space):
             is_terminal=np.zeros(num, bool),
         )
         state, _ = agent.encode_and_get_post(obs, prior)  # (posterior, prior)
+        if posterior == "mode":
+            state = posterior_mode(state)
         prev_action = actions[:, t].astype(np.float32)
 
     return {key: np.asarray(value) for key, value in state.items()}
 
 
-def representations(agent, observations, actions, obs_space):
-    state = filter_posterior(agent, observations, actions, obs_space)
+def representations(agent, observations, actions, obs_space, posterior):
+    state = filter_posterior(agent, observations, actions, obs_space, posterior)
     deter = state["deter"]
     stoch = state["stoch"].reshape(len(deter), -1)
     return {
@@ -97,21 +111,40 @@ def representations(agent, observations, actions, obs_space):
     }
 
 
+def sampling_noise(first, second):
+    """Run-to-run difference between two sampled extractions, relative to the spread across probes.
+
+    Mean absolute difference per probe and dimension, divided by the mean (over dimensions) standard deviation
+    across probes. 0 = deterministic; around 1 = the noise is as large as the differences between probe states.
+    """
+    spread = first.std(axis=0).mean()
+    return round(float(np.abs(first - second).mean() / spread), 4) if spread > 0 else None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--probes", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--posterior", choices=["sample", "mode"], default="sample")
     args = parser.parse_args()
 
     agent, obs_space, config = load_agent(args.checkpoint.parent, args.checkpoint)
     with np.load(args.probes) as probes:
         observations, actions = probes["observations"], probes["actions"]
 
+    def extract():
+        return representations(agent, observations, actions, obs_space, args.posterior)
+
     # The untrained control first (same architecture, config and seed, at initialisation), then the checkpoint.
-    outputs = {f"{name}_untrained": arrays for name, arrays in representations(agent, observations, actions, obs_space).items()}
+    outputs = {f"{name}_untrained": arrays for name, arrays in extract().items()}
     restore(agent, args.checkpoint)
-    outputs.update(representations(agent, observations, actions, obs_space))
+    outputs.update(extract())
+
+    noise = None
+    if args.posterior == "sample":
+        repeat = extract()
+        noise = {name: sampling_noise(outputs[name]["values"], repeat[name]["values"]) for name in repeat}
 
     args.out.mkdir(parents=True, exist_ok=True)
     for name, arrays in outputs.items():
@@ -122,6 +155,8 @@ def main():
         "task": config.task,
         "observation_keys": split_observations(observations[:1, :1], obs_space)[1],
         "window_length": int(observations.shape[1]),
+        "posterior": args.posterior,
+        "sampling_noise": noise,
         "representations": {name: list(arrays["values"].shape) for name, arrays in outputs.items()},
     }
     (args.out / "extract_info.json").write_text(json.dumps(info, indent=2) + "\n")

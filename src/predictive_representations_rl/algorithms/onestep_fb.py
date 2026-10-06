@@ -54,6 +54,8 @@ class OneStepFBAdapter(AlgorithmAdapter):
         )
 
     def extract_command(self, run: ResolvedRun, checkpoint: Path, probes: Path, out_dir: Path) -> Command:
+        if run.config.extract:
+            raise ValueError(f"onestep_fb extraction takes no options, got {sorted(run.config.extract)}")
         script = EXTRACT_DIR / "onestep_fb_extract.py"
         args = (str(script), "--checkpoint", str(checkpoint), "--probes", str(probes), "--out", str(out_dir))
         return Command(args=args, cwd=run.root / REPO, env=self._env(run))

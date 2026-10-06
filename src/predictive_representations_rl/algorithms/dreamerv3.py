@@ -58,8 +58,16 @@ class DreamerV3Adapter(AlgorithmAdapter):
         return Command(args=tuple(args), cwd=run.root / REPO, env={"MUJOCO_GL": "egl", **run.config.environment})
 
     def extract_command(self, run: ResolvedRun, checkpoint: Path, probes: Path, out_dir: Path) -> Command:
+        options = dict(run.config.extract)
+        posterior = options.pop("posterior", "sample")
+        if options:
+            raise ValueError(f"unknown dreamerv3 extract options {sorted(options)}; supported: posterior")
+        if posterior not in ("sample", "mode"):
+            raise ValueError(f"extract.posterior must be 'sample' or 'mode', got {posterior!r}")
+
         script = EXTRACT_DIR / "dreamerv3_extract.py"
-        args = (str(script), "--checkpoint", str(checkpoint), "--probes", str(probes), "--out", str(out_dir))
+        args = (str(script), "--checkpoint", str(checkpoint), "--probes", str(probes), "--out", str(out_dir),
+                "--posterior", posterior)
         return Command(args=args, cwd=run.root / REPO, env={"MUJOCO_GL": "egl", **run.config.environment})
 
     def find_checkpoint(self, run: ResolvedRun) -> Path | None:

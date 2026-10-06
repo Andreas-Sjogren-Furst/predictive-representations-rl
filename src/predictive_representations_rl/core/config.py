@@ -22,6 +22,8 @@ class ExperimentConfig:
     overrides: dict[str, Any] = field(default_factory=dict)
     # Extra environment variables for the algorithm process (e.g. JAX_PLATFORMS: cpu).
     environment: dict[str, str] = field(default_factory=dict)
+    # Options for the algorithm's extraction script (e.g. dreamerv3: {posterior: mode}).
+    extract: dict[str, Any] = field(default_factory=dict)
     # Cluster resources for `prl run --submit lsf`; see runner.DEFAULT_RESOURCES.
     resources: dict[str, Any] = field(default_factory=dict)
 

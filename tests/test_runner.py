@@ -279,3 +279,29 @@ def test_dreamerv3_command():
     assert flags["--task"] == "dmc_point_mass_maze_reach_top_left"
     assert flags["--logdir"] == str(run.native_dir)
     assert flags["--run.steps"] == "1500" and flags["--run.train_ratio"] == "64"
+
+
+def test_dreamerv3_extract_posterior_option():
+    base = ExperimentConfig(env="point_mass_maze", algo="dreamerv3", mode="online", task="reach_top_left")
+    paths = (Path("ckpt"), Path("probes.npz"), Path("out"))
+
+    def posterior_flag(config):
+        run = runner.resolve(config, seed=0, root=PROJECT_ROOT, allow_missing=True)
+        args = run.adapter.extract_command(run, *paths).args
+        return args[args.index("--posterior") + 1]
+
+    assert posterior_flag(base) == "sample"
+    assert posterior_flag(ExperimentConfig(**{**base.__dict__, "extract": {"posterior": "mode"}})) == "mode"
+
+    for bad in ({"posterior": "mean"}, {"temperature": 1}):
+        run = runner.resolve(ExperimentConfig(**{**base.__dict__, "extract": bad}), seed=0, root=PROJECT_ROOT, allow_missing=True)
+        with pytest.raises(ValueError):
+            run.adapter.extract_command(run, *paths)
+
+
+def test_onestep_fb_rejects_extract_options():
+    config = ExperimentConfig(env="point_mass_maze", algo="onestep_fb", mode="offline", dataset="exorl_rnd", extract={"posterior": "mode"})
+    run = runner.resolve(config, seed=0, root=PROJECT_ROOT, allow_missing=True)
+
+    with pytest.raises(ValueError, match="takes no options"):
+        run.adapter.extract_command(run, Path("ckpt"), Path("probes.npz"), Path("out"))

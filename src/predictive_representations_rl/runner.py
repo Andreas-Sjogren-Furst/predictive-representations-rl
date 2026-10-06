@@ -186,7 +186,10 @@ def extract(run: ResolvedRun, probe_name: str = "default", environment: dict[str
 
     out_dir = run.run_dir / "probes" / probe_name
     out_dir.mkdir(parents=True, exist_ok=True)
-    command = run.adapter.extract_command(run, checkpoint, probes, out_dir)
+    try:
+        command = run.adapter.extract_command(run, checkpoint, probes, out_dir)
+    except ValueError as error:
+        raise RunError(str(error)) from error
     argv = run.adapter.spec.runtime.argv(command, run.root)
 
     with open(out_dir / "extract.log", "wb") as log:
@@ -204,6 +207,8 @@ def extract(run: ResolvedRun, probe_name: str = "default", environment: dict[str
         "at": _now(),
         "probe_set": str(probes),
         "checkpoint": str(checkpoint),
+        "options": run.config.extract,
+        "info": {key: value for key, value in info.items() if key not in ("checkpoint", "representations")},
         "representations": info["representations"],
         "dir": str(out_dir),
     }
