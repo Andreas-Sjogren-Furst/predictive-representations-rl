@@ -251,7 +251,7 @@ def compare_linear_probes(runs: list[ResolvedRun], probe_name: str = "default") 
 
     rows, baseline_done = [], False
     for run in runs:
-        label = "/".join(filter(None, [run.config.algo, run.config.task, f"seed_{run.seed}"]))
+        label = run_label(run)
         for row in read_rows(run.run_dir / "analysis" / probe_name / "linear_probe" / "linear_probe.csv"):
             if row["representation"] == BASELINE_REPRESENTATION:
                 if baseline_done:
@@ -266,6 +266,35 @@ def compare_linear_probes(runs: list[ResolvedRun], probe_name: str = "default") 
     output_dir.mkdir(parents=True, exist_ok=True)
     write_rows(rows, output_dir / "linear_probe_comparison.csv")
     plot_scores(rows, output_dir / "linear_probe_comparison.png", f"Linear probe on {env}: all runs")
+    return output_dir
+
+
+def run_label(run: ResolvedRun) -> str:
+    return "/".join(filter(None, [run.config.algo, run.config.task, f"seed_{run.seed}"]))
+
+
+def compare_cka(runs: list[ResolvedRun], probe_name: str = "default") -> Path:
+    """Linear CKA between every representation of every run (and the observation baseline) on the shared probe set."""
+    from predictive_representations_rl.analysis.base import load_extraction
+    from predictive_representations_rl.analysis.cka import cka_matrix, plot_matrix, write_matrix
+
+    probe_set = ProbeSet.load(probe_set_path(runs[0].root, runs[0].env, probe_name))
+    representations = {}
+    for run in runs:
+        probe_dir = run.run_dir / "probes" / probe_name
+        if not (probe_dir / "metadata.npz").exists():
+            raise RunError(f"no extraction for probe set {probe_name!r} in {run.run_dir}; run `prl extract` first")
+        values, metadata = load_extraction(probe_dir)
+        if not np.array_equal(metadata.get("source_index"), probe_set.metadata.get("source_index")):
+            raise RunError(f"{run.run_dir} was extracted on a different version of probe set {probe_name!r}; re-extract it")
+        representations.update({f"{run_label(run)}: {name}": array for name, array in values.items()})
+    representations[BASELINE_REPRESENTATION] = probe_set.final_observations
+
+    names, matrix = cka_matrix(representations)
+    output_dir = runs_dir(runs[0].root) / runs[0].env.name / "analysis" / probe_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    write_matrix(names, matrix, output_dir / "cka.csv")
+    plot_matrix(names, matrix, output_dir / "cka.png", f"Linear CKA between representations on {runs[0].env.name}")
     return output_dir
 
 

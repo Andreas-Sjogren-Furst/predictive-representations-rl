@@ -12,6 +12,7 @@ from predictive_representations_rl.runner import (
     RunError,
     analyze,
     build_probe_set,
+    compare_cka,
     compare_linear_probes,
     command_line,
     extract,
@@ -138,9 +139,15 @@ def _extract(path: Path, seeds: list[int] | None, probe_name: str, cpu: bool) ->
     return 1 if failed else 0
 
 
+# Analyses over several runs at once; the rest run per run (see analysis.ANALYZERS).
+CROSS_RUN_ANALYSES = ("cka",)
+
+
 def _analyze(paths: list[Path], seeds: list[int] | None, probe_name: str, analyses: str | None) -> int:
     root = find_project_root()
-    names = analyses.split(",") if analyses else None
+    requested = analyses.split(",") if analyses else None
+    cross_run = [name for name in CROSS_RUN_ANALYSES if requested is None or name in requested]
+    names = None if requested is None else [name for name in requested if name not in CROSS_RUN_ANALYSES]
     runs = []
     try:
         for path in paths:
@@ -156,6 +163,9 @@ def _analyze(paths: list[Path], seeds: list[int] | None, probe_name: str, analys
 
     done, failed = [], False
     for run in runs:
+        if names == []:  # only cross-run analyses were requested
+            done.append(run)
+            continue
         try:
             results = analyze(run, probe_name, names)
         except RunError as error:
@@ -167,7 +177,13 @@ def _analyze(paths: list[Path], seeds: list[int] | None, probe_name: str, analys
             print(f"✓ {name}: {out}")
 
     if len(done) > 1 and (names is None or "linear_probe" in names):
-        print(f"✓ comparison: {compare_linear_probes(done, probe_name)}")
+        print(f"✓ linear-probe comparison: {compare_linear_probes(done, probe_name)}")
+    if done and "cka" in cross_run:
+        try:
+            print(f"✓ cka: {compare_cka(done, probe_name) / 'cka.png'}")
+        except RunError as error:
+            print(f"✗ cka: {error}")
+            failed = True
 
     return 1 if failed else 0
 
@@ -207,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     analyze_parser.add_argument("configs", nargs="+", type=Path)
     analyze_parser.add_argument("--seed", type=int, action="append", dest="seeds")
     analyze_parser.add_argument("--probes", default="default", help="Probe set name.")
-    analyze_parser.add_argument("--analysis", help="Comma-separated analyses (default: all): pca,linear_probe")
+    analyze_parser.add_argument("--analysis", help="Comma-separated analyses (default: all): pca,linear_probe,cka")
 
     args = parser.parse_args(argv)
 

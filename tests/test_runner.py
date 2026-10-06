@@ -203,6 +203,34 @@ def test_analyze_adds_the_observation_baseline_and_records_results(root):
     assert set(json.loads((run.run_dir / "run.json").read_text())["analyses"]["default"]) == {"pca", "linear_probe"}
 
 
+def test_compare_cka_includes_the_baseline_and_rejects_stale_extractions(root):
+    rng = np.random.default_rng(0)
+    probe_set = ProbeSet(
+        observations=rng.normal(size=(50, 2, 2)).astype(np.float32),
+        actions=np.zeros((50, 2, 1), np.float32),
+        metadata={"source_index": np.arange(50), "episode": np.repeat(np.arange(10), 5)},
+    )
+    run = runner.resolve(fake_config(), seed=0, root=root)
+    probe_set.save(runner.probe_set_path(root, run.env))
+    runner.run_locally(run)
+    runner.extract(run)
+
+    out = runner.compare_cka([run])
+
+    header = (out / "cka.csv").read_text().splitlines()[0].split(",")
+    assert header == ["representation", "fake/seed_0: z", runner.BASELINE_REPRESENTATION]
+    assert (out / "cka.png").exists()
+
+    # The fake extraction is 2 * the final observation, so CKA with the baseline is exactly 1.
+    assert float((out / "cka.csv").read_text().splitlines()[1].split(",")[2]) == pytest.approx(1.0)
+
+    ProbeSet(probe_set.observations, probe_set.actions, {**probe_set.metadata, "source_index": np.arange(50) + 1}).save(
+        runner.probe_set_path(root, run.env)
+    )
+    with pytest.raises(runner.RunError, match="different version"):
+        runner.compare_cka([run])
+
+
 def test_analyze_needs_an_extraction(root):
     run = runner.resolve(fake_config(), seed=0, root=root)
     runner.run_locally(run)
