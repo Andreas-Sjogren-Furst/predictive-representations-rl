@@ -2,296 +2,316 @@
 
 ## Goal
 
-Build a **thin experimental harness** for comparing reinforcement-learning algorithms across environments without rewriting training or analysis code.
-
-The core design principle is:
+Build a **thin experimental harness** that makes it easy to run existing RL algorithms on selectable environments, collect their outputs in one standard format, and analyse their learned representations.
 
 ```text
 Environment ⟂ Algorithm ⟂ Analysis
 ```
 
-The framework should **not** replace Dreamer, FB, or other existing implementations. It should wrap them with small adapters and standardize only the boundaries needed for fair experiments and representation analysis.
+Principles:
 
-A compatible algorithm or environment should be addable with **one small adapter**, without changing the rest of the system.
-
----
-
-## 1. Minimal interfaces
-
-### Environment adapter
-
-```python
-from abc import ABC, abstractmethod
-
-class EnvAdapter(ABC):
-    @abstractmethod
-    def reset(self, seed: int | None = None):
-        ...
-
-    @abstractmethod
-    def step(self, action):
-        ...
-
-    @property
-    @abstractmethod
-    def observation_spec(self):
-        ...
-
-    @property
-    @abstractmethod
-    def action_spec(self):
-        ...
-
-    def factors(self, observation) -> dict:
-        """Optional ground-truth factors for analysis."""
-        return {}
-```
-
-For Gymnasium environments, provide a generic `GymEnvAdapter`.
-
-For controlled thesis environments such as Four Rooms, `factors()` should expose interpretable state variables such as:
-
-```python
-{
-    "x": ...,
-    "y": ...,
-    "room": ...,
-    "color": ...,
-    "goal_distance": ...,
-}
-```
+- **Run algorithms as they are.** The harness does not replace or rewrite Dreamer, FB, or any other implementation, and does not force them into a common training mode. Each algorithm runs in its native mode (online, offline, ...) with its native replay buffer or dataset loader.
+- **Describe, don't constrain.** Each algorithm declares what it is (online/offline, data it needs, action/observation types, representations it exposes). The harness uses this to pick the right launch path and to reject incompatible env × algorithm combinations before a run starts.
+- **Record, don't enforce.** Experience and compute (transitions seen, gradient steps, data source) are recorded for every run so they can be compared afterwards; they are not forced to be equal at this stage.
+- **One small adapter per algorithm or environment.** Adding one must not require changes elsewhere.
+- **Analysis only reads standard artifacts**, never algorithm-specific log directories.
 
 ---
 
-### Algorithm adapter
+## 1. Architecture: an orchestrator, not a shared process
 
-Do **not** force all algorithms into the same internal training loop.
+The algorithms cannot share a Python process with each other or with the harness:
 
-Each adapter may call the original implementation internally.
+| Component | Python | Key dependencies | Runtime |
+|---|---|---|---|
+| Harness (`predictive_representations_rl`) | 3.12 | numpy (+ analysis libs) | `uv` project venv |
+| `third_party/onestep-fb` | 3.10 | JAX/Flax, gymnasium 0.29 | `third_party/onestep-fb/.venv` |
+| `third_party/Offline_vs_Online_in_MBRL` (DreamerV3) | 3.9 | JAX + TensorFlow, gym 0.19 | Singularity/Docker image or own venv |
+
+So the harness **orchestrates subprocesses**. Every run has three stages:
+
+```text
+            harness (py3.12)                         algorithm runtime (own venv/container)
+┌───────────────────────────────────┐        ┌──────────────────────────────────────────┐
+│ 1. resolve config + check compat  │──cmd──►│ train: the repo's own entry point         │
+│                                   │        │   (main.py / dreamerv3/train.py)          │
+│ 2. extract                        │──cmd──►│ extract: small script in harness/extract/ │
+│                                   │◄─.npz──│   loads checkpoint, encodes probe set     │
+│ 3. analyse (in-process)           │        └──────────────────────────────────────────┘
+└───────────────────────────────────┘
+```
+
+Extraction scripts live in this repo (not in the submodules) but are executed with the algorithm's interpreter, so they can import the algorithm's code. They exchange data with the harness only through `.npz`/`.json` files.
+
+---
+
+## 2. Algorithm descriptors and adapters
+
+### Descriptor: what the algorithm is
+
+```python
+@dataclass(frozen=True)
+class AlgorithmSpec:
+    name: str                                          # "dreamerv3", "onestep_fb"
+    description: str
+    modes: Mapping[LearningMode, DataRequirement]      # {"online": "self_collected", "offline": "replay"}
+    action_spaces: frozenset[str]                      # {"continuous"} / {"discrete", "continuous"}
+    observation_types: frozenset[str]                  # {"state", "pixels"}
+    representations: tuple[str, ...]                  # names exposed by extraction
+    stateful_representation: bool                      # True if the representation depends on history (RNN)
+    task_specific: bool                                # True: trains on one task's reward; False: task-agnostic pretraining
+    runtime: Runtime                                   # Venv(path) | Container(image)
+```
+
+`DataRequirement` is what a mode needs before it starts: `self_collected` (interacts and fills its own replay), `dataset` (a fixed offline dataset from the env registry), or `replay` (another run's replay directory).
+
+Initial descriptors:
+
+| | `dreamerv3` | `onestep_fb` |
+|---|---|---|
+| modes → data | online → self_collected; offline (passive) → replay | offline → dataset (ExORL hdf5 / OGBench npz) |
+| training | single task | task-agnostic pretraining, zero-shot on every task |
+| actions | discrete, continuous | continuous only |
+| observations | state (`dmc_proprio`), pixels (`dmc_vision`) | state, pixels |
+| representations | `deter` (h), `stoch` (z), `model_state` (h,z) | `backward` B(s), `forward` F(s,a,z), `latent` z per task |
+| stateful | yes | no |
+
+### Adapter: how to run it
 
 ```python
 class AlgorithmAdapter(ABC):
-    @abstractmethod
-    def train(self, env, config):
-        ...
+    spec: AlgorithmSpec
 
     @abstractmethod
-    def act(self, observation, eval: bool = False):
-        ...
+    def train_command(self, run: ResolvedRun) -> Command:
+        """argv + env vars that launch the repo's own training entry point."""
 
     @abstractmethod
-    def save(self, path):
-        ...
+    def find_checkpoint(self, run_dir: Path) -> Path:
+        """Locate the checkpoint the repo wrote."""
 
     @abstractmethod
-    def load(self, path):
-        ...
+    def extract_command(self, run: ResolvedRun, probe_set: Path, out_dir: Path) -> Command:
+        """Command that writes <representation>.npz for the probe set."""
 
-    def representations(self, batch) -> dict[str, "np.ndarray"]:
-        """Return named representations for analysis."""
-        return {}
-
-    @property
-    def capabilities(self) -> set[str]:
-        return set()
+    def collect_metrics(self, run_dir: Path) -> Iterator[dict]:
+        """Translate the repo's native logs into standard metrics.jsonl rows."""
 ```
 
-Examples:
+The adapter only builds command lines, maps names, and parses outputs. All learning happens in the original code.
 
-Dreamer:
+### Compatibility check
 
-```python
-{
-    "deterministic_state": h,
-    "stochastic_state": z,
-    "model_state": concat(h, z),
-}
-```
-
-FB:
-
-```python
-{
-    "backward": B,
-    "forward": F,
-}
-```
-
-All arrays returned to the analysis layer must be converted to **NumPy**.
+Before launching, the runner checks `env.action_type ∈ algo.action_spaces`, `obs_type ∈ algo.observation_types`, `mode ∈ algo.learning_modes`, and that the required data source exists (e.g. the ExORL hdf5 file). Failures produce a clear message such as *"onestep_fb does not support discrete actions"* instead of a crash mid-run.
 
 ---
 
-## 2. Probe sets
+## 3. Environment registry
 
-Representation analysis must use a fixed set of states so algorithms are compared on exactly the same inputs.
-
-```python
-class ProbeSet:
-    observations: np.ndarray
-    metadata: dict[str, np.ndarray]
-```
-
-For small controlled environments, enumerate all states if possible.
-
-Example metadata:
+Environments are selected by name. Each entry describes the environment once and maps it to each algorithm's own naming:
 
 ```python
-{
-    "x": ...,
-    "y": ...,
-    "room": ...,
-    "reward": ...,
-    "shortest_path_distance": ...,
-}
+@dataclass(frozen=True)
+class EnvSpec:
+    name: str                              # "point_mass_maze"
+    suite: str                             # "dmc"
+    tasks: tuple[str, ...]                 # ("reach_top_left", ...)
+    action_type: str                       # "continuous"
+    observation_types: frozenset[str]      # {"state", "pixels"}
+    datasets: dict[str, DatasetSpec]       # {"exorl_rnd": DatasetSpec(...)}
+    algo_names: dict[str, Callable]        # algo -> (task, obs_type) -> native env/task string
+    factors: Callable | None               # ground-truth factors for analysis
 ```
 
-The same probe set should be passed through Dreamer, FB, and future algorithms.
+Example native names for `point_mass_maze`, task `reach_top_left`:
+
+- one-step FB: `--env_name=exorl-rnd-point_mass_maze` (trains on all tasks, evaluates zero-shot on each)
+- DreamerV3: `--task dmc_point_mass_maze_reach_top_left --configs dmc_proprio`
+
+For controlled environments, `factors()` exposes interpretable state variables (for point_mass_maze: `x`, `y`, `vx`, `vy`, distance to each goal corner).
 
 ---
 
-## 3. Analysis interface
+## 4. Data sources and replay buffers
 
-Analysis modules should know nothing about the original algorithm implementation.
-
-They receive:
-
-```python
-representations: np.ndarray   # shape [N, D]
-metadata: dict
-```
-
-Initial analyses:
-
-- PCA
-- UMAP
-- latent-dimension heatmaps
-- linear probes
-- pairwise latent-distance analysis
-- CKA between checkpoints / tasks
-- Procrustes or representational-similarity analysis
-
-Example:
-
-```python
-class Analyzer(ABC):
-    requires: set[str] = {"representation"}
-
-    @abstractmethod
-    def run(self, representations, metadata, output_dir):
-        ...
-```
-
-Avoid comparing individual latent coordinates directly. Neural representations may rotate or permute while preserving the same information.
+- **Algorithms keep their own replay buffers.** Dreamer's online run fills its own replay directory; FB loads its own dataset. The harness does not reimplement replay.
+- The harness manages **offline data sources** only: where a dataset lives, whether it exists, how to obtain it (download/generate commands), and its size.
+- Where data must move between algorithms (e.g. Dreamer replay → FB dataset, or ExORL → Dreamer passive replay) the existing canonical types in `core/data.py` (`Trajectory`, `RepresentationDataset`, `TaskDataset`) are the intermediate format, with one converter per algorithm format (`backends/fb.py::representation_dataset_to_fb` is the first). Not needed for milestone 1.
 
 ---
 
-## 4. Suggested project structure
+## 5. Experiment configs and CLI
 
-```text
-src/
-├── core/
-│   ├── types.py
-│   ├── registry.py
-│   └── config.py
-│
-├── envs/
-│   ├── base.py
-│   ├── gym_adapter.py
-│   └── four_rooms.py
-│
-├── algorithms/
-│   ├── base.py
-│   ├── dreamer_adapter.py
-│   ├── fb_adapter.py
-│   └── onestep_fb_adapter.py
-│
-├── probes/
-│   ├── probe_set.py
-│   └── extractor.py
-│
-├── analysis/
-│   ├── pca.py
-│   ├── umap.py
-│   ├── linear_probe.py
-│   ├── cka.py
-│   ├── latent_distance.py
-│   └── heatmap.py
-│
-├── runner.py
-└── cli.py
+One small YAML file per experiment; anything under `overrides` is passed through to the algorithm unchanged.
+
+```yaml
+# configs/point_mass_maze/onestep_fb.yaml
+env: point_mass_maze
+algo: onestep_fb
+mode: offline
+dataset: exorl_rnd
+obs_type: state
+seeds: [0]
+budget: {train_steps: 1_000_000}
+overrides:
+  agent.latent_dim: 50
+  agent.discount: 0.98
 ```
 
-Existing implementations remain under:
-
-```text
-third_party/
-├── onestep-fb/
-└── Offline_vs_Online_in_MBRL/
+```bash
+uv run prl check  configs/point_mass_maze/onestep_fb.yaml            # compatibility + data check only
+uv run prl run    configs/point_mass_maze/onestep_fb.yaml --seed 0   # train → extract → metrics
+uv run prl sweep  configs/point_mass_maze/*.yaml --seeds 0-2         # many runs
+uv run prl run    ... --submit lsf                                   # submit to the cluster instead of running locally
+uv run prl analyze runs/point_mass_maze --analysis pca,linear_probe
+uv run prl list   envs|algos|runs
 ```
-
-Adapters should wrap these repositories rather than heavily modifying them.
 
 ---
 
-## 5. Standard experiment output
-
-Every experiment should produce the same directory structure:
+## 6. Standard run directory
 
 ```text
 runs/
 └── <environment>/
     └── <algorithm>/
-        └── seed_<N>/
-            ├── config.json
-            ├── metrics.jsonl
-            ├── checkpoints/
+        └── <mode>/seed_<N>/
+            ├── run.json            # resolved config + provenance (below)
+            ├── metrics.jsonl       # standardized metrics (train + eval)
+            ├── native/             # the repo's own logs/checkpoints, untouched
             ├── probes/
             │   ├── <representation>.npz
             │   └── metadata.npz
-            ├── videos/
             └── analysis/
 ```
 
-Analysis code should read only these standardized artifacts, never algorithm-specific log directories.
+`run.json` records: algorithm, mode, env, task(s), obs type, data source (path + hash), **transitions seen**, **environment steps taken**, **gradient steps**, seeds, the exact command line, runtime (venv/container), and the git commit of the harness and of each submodule. This is what makes later fairness comparisons possible without enforcing them now.
 
 ---
 
-## 6. CLI target
+## 7. Probe sets and representation extraction
 
-Desired usage:
+Representation analysis uses a fixed set of inputs so all algorithms are compared on exactly the same states.
 
-```bash
-python -m src.run     --env four_rooms     --algo dreamer     --seed 0
+```python
+@dataclass(frozen=True)
+class ProbeSet:
+    observations: np.ndarray          # [N, T, obs_dim]  short sequences ending at the probe state
+    actions: np.ndarray               # [N, T, act_dim]  actions along those sequences
+    metadata: dict[str, np.ndarray]   # factors at the final state: x, y, goal distances, ...
 ```
 
-```bash
-python -m src.run     --env four_rooms     --algo onestep_fb     --seed 0
+- **Stateless representations** (FB `B(s)`, `F(s,a,z)`) use only the final state of each sequence.
+- **Stateful representations** (Dreamer `h`, `z`) are computed by running the RSSM posterior over the whole sequence; the value at the final step is the representation. A single observation would give a meaningless `h`, so probes are sequences (default `T = 16`) cut from held-out trajectories.
+- Probe sets are generated once per environment by the harness and saved under `probes/<env>/<name>.npz`, then passed to every algorithm's extraction script.
+
+---
+
+## 8. Analysis
+
+Analysers receive only arrays and metadata:
+
+```python
+class Analyzer(ABC):
+    name: str
+
+    @abstractmethod
+    def run(self, representations: dict[str, np.ndarray], metadata: dict[str, np.ndarray], output_dir: Path) -> dict:
+        ...
 ```
 
-Analysis:
+Initial: PCA, linear probes (predict factors from representation). Later: UMAP, latent-dimension heatmaps, pairwise latent-distance vs. true distance, CKA between checkpoints/algorithms, Procrustes/RSA.
 
-```bash
-python -m src.analyze     --run runs/four_rooms/dreamer/seed_0     --analysis pca,linear_probe,cka
+Avoid comparing individual latent coordinates directly; representations may be rotated or permuted while carrying the same information.
+
+---
+
+## 9. Package layout
+
+Builds on the existing package rather than replacing it:
+
+```text
+src/predictive_representations_rl/
+├── core/
+│   ├── data.py            # existing: Trajectory, RepresentationDataset, TaskDataset
+│   ├── evaluation.py      # existing: evaluate()
+│   ├── backend.py         # existing in-process interface; superseded by algorithms/base.py
+│   ├── config.py          # YAML → ResolvedRun
+│   ├── runtime.py         # Venv / Container, subprocess launching
+│   └── registry.py        # env + algorithm registries
+├── envs/
+│   ├── base.py            # EnvSpec, DatasetSpec
+│   └── dmc.py             # point_mass_maze (+ walker, cheetah, ... later)
+├── algorithms/
+│   ├── base.py            # AlgorithmSpec, AlgorithmAdapter
+│   ├── onestep_fb.py
+│   └── dreamerv3.py
+├── backends/
+│   └── fb.py              # existing: canonical data → FB format
+├── extract/               # run inside each algorithm's runtime
+│   ├── onestep_fb_extract.py
+│   └── dreamerv3_extract.py
+├── probes/
+│   └── probe_set.py
+├── analysis/
+│   ├── pca.py
+│   └── linear_probe.py
+├── runner.py              # check → train → extract → metrics
+└── cli.py                 # `prl` entry point
+configs/                   # experiment YAML files
+runs/                      # outputs (git-ignored)
 ```
 
 ---
 
-## 7. First implementation milestone
+## 10. Milestone 1: point_mass_maze, both algorithms, end to end
 
-Do not build every abstraction immediately.
+`point_mass_maze` is a 2D point mass in a maze with four goal corners (`reach_top_left`, `reach_top_right`, `reach_bottom_left`, `reach_bottom_right`). Both repos ship the same ExORL `custom_dmc_tasks` implementation, actions are continuous, and the (x, y) position gives a direct ground truth for the representation analysis.
 
-Implement only enough to prove the design with:
+### 10.1 Make each algorithm runnable on point_mass_maze by hand
 
-1. One controlled environment: `FourRooms`.
-2. `EnvAdapter`.
-3. `AlgorithmAdapter`.
-4. One Dreamer adapter.
-5. One one-step-FB adapter.
-6. `ProbeSet`.
-7. PCA analysis.
-8. Linear-probe analysis.
-9. Standardized run directory.
+**One-step FB (offline, ExORL RND data).** Two bugs in the fork's *environment/dataset plumbing* (not the algorithm) currently break this domain:
 
-Once both Dreamer and one-step FB can train and produce representations through the same pipeline, extend the framework.
+1. `envs/exorl_utils.py::make_env_and_datasets`: for a domain-only name, the default task is `'walk'` (or `'reach_bottom_left'` for jaco); `'walk'` is not a point_mass_maze task, so the `ALL_TASKS` assertion fails. Fix: keep `'walk'` where the domain has it, otherwise default to `ALL_TASKS[domain_name][0]` (unchanged for walker/cheetah/quadruped/jaco).
+2. `data_gen_scripts/exorl_dataset_aggregator.py::_worker_fn`: task keys are derived with `'_'.join(task.split('_')[1:])`, which turns `point_mass_maze_reach_top_left` into `mass_maze_reach_top_left`. The rewards are then stored as `rewards_mass_maze_...`, but `relabel_dataset` looks up `rewards_reach_top_left`. Fix: pass bare task names to the workers and build the env name from the known domain.
+
+Status: both fixed in the submodule working tree and verified on a small synthetic point_mass_maze buffer (aggregate → hdf5 → `make_env_and_datasets` → `relabel_dataset` for all four tasks). Still to do: commit in the fork (`Andreas-Sjogren-Furst/onestep-fb`), push, and bump the submodule. Then:
+
+```bash
+sh data_gen_scripts/exorl_download.sh point_mass_maze rnd
+python data_gen_scripts/generate_exorl_dataset.py --domain_name=point_mass_maze --save_path=~/.exorl/data/rnd-point_mass_maze.hdf5
+python data_gen_scripts/generate_exorl_dataset.py --domain_name=point_mass_maze --save_path=~/.exorl/data/rnd-point_mass_maze-val.hdf5 --skip_size=5_000_000 --dataset_size=100_000
+python main.py --env_name=exorl-rnd-point_mass_maze --agent=agents/onestep_fb.py --train_steps=<small> ...
+```
+
+**DreamerV3 (online, proprio).** `dmc_point_mass_maze_reach_bottom_right` is already in the repo's DMC task list and `embodied/envs/dmc.py` routes maze tasks to `custom_dmc_tasks`. Open item: set up a runtime on the HPC (Singularity image from the repo, or a Python 3.9 venv following the Dockerfile) and confirm a short run with `--configs dmc_proprio --task dmc_point_mass_maze_reach_top_left`.
+
+### 10.2 Harness
+
+1. ✅ `AlgorithmSpec`, `EnvSpec`, registries, YAML configs, compatibility check (`prl check`, `prl list`).
+2. `Runtime` (venv first, container second) and `runner.py` that launches training and writes `run.json` + `native/`.
+3. Adapters: `onestep_fb` and `dreamerv3` (train command, checkpoint location, metrics translation).
+4. Probe-set generator for point_mass_maze (sequences from the RND val split, metadata = x, y, velocities, goal distances).
+5. Extraction scripts for both algorithms → `probes/<representation>.npz`.
+6. PCA and linear-probe analysers; `prl analyze`.
+
+**Done when:** `prl run` works for both configs on point_mass_maze, each run directory contains `run.json`, `metrics.jsonl` and probe representations, and `prl analyze` produces PCA plots and linear-probe scores for FB `B`/`F` and Dreamer `h`/`z` on the same probe set.
+
+---
+
+## 11. Known issues / open questions
+
+- **Dreamer runtime on the HPC** is not set up yet (container vs. venv).
+- **FB is continuous-action only.** Discrete environments (e.g. a gridworld Four Rooms) need either a continuous variant or an FB change; deferred.
+- **Dreamer offline (passive) mode is not purely offline**: it steps a training env to pace updates and prefills its eval replay with a random policy. Fine for "run as is"; must be accounted for (and recorded in `run.json`) when comparing experience later.
+- **Different experience by default**: FB trains on ~5M RND transitions; Dreamer online collects its own. Recorded, not equalized, in milestone 1.
+- `core/backend.py` (in-process `PredictiveRLBackend`) does not fit the subprocess design; keep until the adapters replace it, then remove.
+
+## 12. Later
+
+- More environments (walker, cheetah, quadruped, jaco; OGBench), and a continuous Four Rooms.
+- More analysers (UMAP, CKA, RSA, distance analysis).
+- Experience-matched comparisons (shared datasets via the canonical data format).
+- Cluster sweeps with result aggregation.
 
 The framework should stay **thin**. If an abstraction requires large changes to the original RL algorithms, it is probably too low-level.

@@ -1,0 +1,10 @@
+# DreamerV3: online (active) training on a single task from proprioceptive state.
+env: point_mass_maze
+algo: dreamerv3
+mode: online
+obs_type: state
+task: reach_top_left
+seeds: [0]
+budget:
+  env_steps: 500_000
+overrides: {}

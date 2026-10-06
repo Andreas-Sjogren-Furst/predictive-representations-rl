@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 .venvs/
+
+# Experiment outputs
+runs/
