@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from predictive_representations_rl.core.runtime import Command, Runtime
 
+# Extraction scripts run inside each algorithm's runtime; they live here but never import this package.
+EXTRACT_DIR = Path(__file__).resolve().parents[1] / "extract"
+
 if TYPE_CHECKING:
     from predictive_representations_rl.runner import ResolvedRun
 
@@ -49,6 +52,10 @@ class AlgorithmAdapter(ABC):
     @abstractmethod
     def find_checkpoint(self, run: ResolvedRun) -> Path | None:
         """The latest checkpoint the algorithm wrote, if any."""
+
+    @abstractmethod
+    def extract_command(self, run: ResolvedRun, checkpoint: Path, probes: Path, out_dir: Path) -> Command:
+        """Command that writes <representation>.npz (key `values`) and extract_info.json for a probe set into `out_dir`."""
 
     @abstractmethod
     def experience(self, run: ResolvedRun) -> dict[str, Any]:

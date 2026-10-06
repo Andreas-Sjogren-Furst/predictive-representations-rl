@@ -181,9 +181,11 @@ runs/                                   # or $PRL_RUNS_DIR (e.g. scratch space)
             ├── job.lsf             # when submitted with --submit lsf
             ├── native/             # the repo's own logs/checkpoints, untouched
             ├── metrics.jsonl       # standardized metrics (train + eval)        [not yet]
-            ├── probes/                                                          [not yet]
-            │   ├── <representation>.npz
-            │   └── metadata.npz
+            ├── probes/<probe set>/
+            │   ├── <representation>.npz   # key `values`, [N, D] (FB `latent` is [tasks, D])
+            │   ├── metadata.npz           # copy of the probe set's per-probe factors
+            │   ├── extract_info.json
+            │   └── extract.log
             └── analysis/                                                        [not yet]
 ```
 
@@ -295,8 +297,10 @@ python main.py --env_name=exorl-rnd-point_mass_maze --agent=agents/onestep_fb.py
 1. ✅ `AlgorithmSpec`, `EnvSpec`, registries, YAML configs, compatibility check (`prl check`, `prl list`).
 2. ✅ `Runtime` (venv, container) and `runner.py`: `prl run <config> [--seed N] [--dry-run] [--submit lsf] [--force]` launches training and writes `run.json`, `train.log`, `native/`.
 3. ✅ Adapters: `onestep_fb` and `dreamerv3` online (train command, checkpoint location, configured experience). Still to do: metrics translation to `metrics.jsonl`; Dreamer offline (passive) mode.
-4. Probe-set generator for point_mass_maze (sequences from the RND val split, metadata = x, y, velocities, goal distances).
-5. Extraction scripts for both algorithms → `probes/<representation>.npz`.
+4. ✅ Probe sets: `prl probes <env>` cuts 4096 windows of 16 steps from the held-out RND val split into `runs/<env>/probes/default.npz` (metadata: x, y, vx, vy, speed, room/quadrant, distance to each goal, per-task reward, episode/step).
+5. ✅ Extraction: `prl extract <config> [--cpu]` runs `extract/<algo>_extract.py` inside the algorithm's runtime on the latest checkpoint and records it under `extractions` in `run.json`.
+   - one-step FB: `backward` B(s,a), `forward` F(s,a) (ensemble mean), `latent` z per task (inferred exactly as main.py does), `q_values` F·z per task. B and F take the dataset action at the probe state (clipped as in training).
+   - DreamerV3: `deter` (h), `stoch` (z, flattened one-hot), `model_state` (h,z) at the final step of the posterior filtered over the window (prev action a_{t-1}, learned initial state at t=0). Matches the repo's own `forward_obs_pass` within sampling noise. State encoders only.
 6. PCA and linear-probe analysers; `prl analyze`.
 
 **Done when:** `prl run` works for both configs on point_mass_maze, each run directory contains `run.json`, `metrics.jsonl` and probe representations, and `prl analyze` produces PCA plots and linear-probe scores for FB `B`/`F` and Dreamer `h`/`z` on the same probe set.
@@ -310,6 +314,8 @@ python main.py --env_name=exorl-rnd-point_mass_maze --agent=agents/onestep_fb.py
 - **FB is continuous-action only.** Discrete environments (e.g. a gridworld Four Rooms) need either a continuous variant or an FB change; deferred.
 - **Dreamer offline (passive) mode is not purely offline**: it steps a training env to pace updates and prefills its eval replay with a random policy. Fine for "run as is"; must be accounted for (and recorded in `run.json`) when comparing experience later.
 - **Different experience by default**: FB trains on ~5M RND transitions; Dreamer online collects its own. Recorded, not equalized, in milestone 1.
+- **Dreamer representations are stochastic**: z is sampled from the posterior and h depends on those samples. On the tiny debug model the run-to-run noise in h was ~60% of its spread across probes. Check on the trained model; if still large, add a deterministic option (posterior mode / logits) or average several samples.
+- **Dreamer action alignment in extraction** is consistent with the repo's own pass but could not be discriminated on the debug model (it barely uses actions); re-check on a trained checkpoint.
 - `core/backend.py` (in-process `PredictiveRLBackend`) does not fit the subprocess design; keep until the adapters replace it, then remove.
 
 ## 12. Later

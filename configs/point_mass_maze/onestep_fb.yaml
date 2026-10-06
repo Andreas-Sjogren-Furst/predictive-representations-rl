@@ -7,7 +7,8 @@ dataset: exorl_rnd
 seeds: [0]
 budget:
   train_steps: 1_000_000
-# Passed to third_party/onestep-fb/main.py as --agent.<key>=<value>; values follow the README's ExORL settings.
+# Passed to third_party/onestep-fb/main.py as --agent.<key>=<value>. The README has no point_mass_maze command;
+# these are its ExORL walker settings, as a starting point.
 overrides:
   agent.backward_repr_hidden_dims: "(256,256,256)"
   agent.forward_repr_hidden_dims: "(1024,1024,1024)"
@@ -16,5 +17,7 @@ overrides:
   agent.latent_dim: 50
   agent.discount: 0.98
   agent.tau: 0.01
+  agent.q_agg: mean
+  agent.orthonorm_coeff: 0.1
   agent.alpha: 0
   agent.tanh_squash: False

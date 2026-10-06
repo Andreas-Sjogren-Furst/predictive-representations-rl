@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from predictive_representations_rl.algorithms.base import AlgorithmAdapter, AlgorithmSpec
+from predictive_representations_rl.algorithms.base import EXTRACT_DIR, AlgorithmAdapter, AlgorithmSpec
 from predictive_representations_rl.core.runtime import Command, Venv
 
 if TYPE_CHECKING:
@@ -19,7 +19,7 @@ ONESTEP_FB = AlgorithmSpec(
     modes={"offline": "dataset"},
     action_spaces=frozenset({"continuous"}),
     observation_types=frozenset({"state", "pixels"}),
-    representations=("forward", "backward", "latent"),
+    representations=("forward", "backward", "latent", "q_values"),
     stateful_representation=False,
     task_specific=False,
     runtime=Venv(f"{REPO}/.venv"),
@@ -50,8 +50,16 @@ class OneStepFBAdapter(AlgorithmAdapter):
         return Command(
             args=("main.py", *(f"--{key}={value}" for key, value in flags.items())),
             cwd=run.root / REPO,
-            env={"PYTHONPATH": str(run.root / REPO), "MUJOCO_GL": "egl", **run.config.environment},
+            env=self._env(run),
         )
+
+    def extract_command(self, run: ResolvedRun, checkpoint: Path, probes: Path, out_dir: Path) -> Command:
+        script = EXTRACT_DIR / "onestep_fb_extract.py"
+        args = (str(script), "--checkpoint", str(checkpoint), "--probes", str(probes), "--out", str(out_dir))
+        return Command(args=args, cwd=run.root / REPO, env=self._env(run))
+
+    def _env(self, run: ResolvedRun) -> dict[str, str]:
+        return {"PYTHONPATH": str(run.root / REPO), "MUJOCO_GL": "egl", **run.config.environment}
 
     def find_checkpoint(self, run: ResolvedRun) -> Path | None:
         checkpoints = list(run.native_dir.rglob("params_*.pkl"))

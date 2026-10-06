@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from predictive_representations_rl import runner
@@ -10,6 +11,7 @@ from predictive_representations_rl.core import registry
 from predictive_representations_rl.core.config import ExperimentConfig
 from predictive_representations_rl.core.runtime import Command, Venv
 from predictive_representations_rl.envs.base import EnvSpec
+from predictive_representations_rl.probes.probe_set import ProbeSet
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,6 +44,16 @@ class FakeAdapter(AlgorithmAdapter):
         path = run.native_dir / "model.ckpt"
         return path if path.exists() else None
 
+    def extract_command(self, run, checkpoint, probes, out_dir):
+        code = (
+            "import json, sys, numpy as np, pathlib;"
+            f"out = pathlib.Path({str(out_dir)!r});"
+            f"obs = np.load({str(probes)!r})['observations'];"
+            "np.savez(out / 'z.npz', values=obs[:, -1] * 2);"
+            "(out / 'extract_info.json').write_text(json.dumps({'representations': {'z': list(obs[:, -1].shape)}}))"
+        )
+        return Command(args=("-c", code), cwd=run.root)
+
     def experience(self, run):
         return {"env_steps": run.config.budget.get("env_steps", 0)}
 
@@ -51,7 +63,10 @@ def root(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").touch()
     (tmp_path / "third_party").mkdir()
     (tmp_path / "venv" / "bin").mkdir(parents=True)
-    (tmp_path / "venv" / "bin" / "python").symlink_to(sys.executable)
+    # A wrapper, not a symlink: a symlinked venv python resolves to the base interpreter and loses site-packages.
+    python = tmp_path / "venv" / "bin" / "python"
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
 
     env = EnvSpec(
         name="toy", suite="test", tasks=("a",), action_type="continuous",
@@ -145,6 +160,33 @@ def test_lsf_script(root):
     assert "#BSUB -q gpuv100" in script
     assert '#BSUB -gpu "num=1:mode=exclusive_process"' in script
     assert f"run {root / 'exp.yaml'} --seed 2" in script
+
+
+def test_extract_writes_representations_and_records_them(root, monkeypatch):
+    probe_set = ProbeSet(
+        observations=np.arange(5 * 3 * 2, dtype=np.float32).reshape(5, 3, 2),
+        actions=np.zeros((5, 3, 1), np.float32),
+        metadata={"x": np.arange(5)},
+    )
+    run = runner.resolve(fake_config(), seed=0, root=root)
+    probe_set.save(runner.probe_set_path(root, run.env))
+    runner.run_locally(run)
+
+    result = runner.extract(run)
+
+    out = run.run_dir / "probes" / "default"
+    np.testing.assert_array_equal(np.load(out / "z.npz")["values"], probe_set.final_observations * 2)
+    np.testing.assert_array_equal(np.load(out / "metadata.npz")["x"], np.arange(5))
+    assert result["representations"] == {"z": [5, 2]}
+    assert json.loads((run.run_dir / "run.json").read_text())["extractions"]["default"]["checkpoint"].endswith("model.ckpt")
+
+
+def test_extract_needs_a_probe_set(root):
+    run = runner.resolve(fake_config(), seed=0, root=root)
+    runner.run_locally(run)
+
+    with pytest.raises(runner.RunError, match="prl probes toy"):
+        runner.extract(run)
 
 
 def test_onestep_fb_command():

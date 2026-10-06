@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from predictive_representations_rl.envs.base import DatasetSpec, EnvSpec
 
 EXORL_DATA_DIR = "~/.exorl/data"
@@ -14,6 +16,7 @@ def exorl_rnd_dataset(domain: str) -> DatasetSpec:
             f"{EXORL_DATA_DIR}/rnd-{domain}.hdf5",
             f"{EXORL_DATA_DIR}/rnd-{domain}-val.hdf5",
         ),
+        probe_file=f"{EXORL_DATA_DIR}/rnd-{domain}-val.hdf5",
         how_to_get=(
             "cd third_party/onestep-fb && "
             f"sh data_gen_scripts/exorl_download.sh {domain} rnd && "
@@ -25,14 +28,41 @@ def exorl_rnd_dataset(domain: str) -> DatasetSpec:
     )
 
 
+# Goal positions from custom_dmc_tasks/point_mass_maze.py (TASKS).
+POINT_MASS_MAZE_GOALS = {
+    "reach_top_left": (-0.15, 0.15),
+    "reach_top_right": (0.15, 0.15),
+    "reach_bottom_left": (-0.15, -0.15),
+    "reach_bottom_right": (0.15, -0.15),
+}
+
+
+def point_mass_maze_factors(observations: np.ndarray) -> dict[str, np.ndarray]:
+    """Observations are [x, y, vx, vy]; rooms are the maze quadrants (0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right)."""
+    x, y, vx, vy = observations.T
+    factors = {
+        "x": x,
+        "y": y,
+        "vx": vx,
+        "vy": vy,
+        "speed": np.hypot(vx, vy),
+        "room": (x >= 0).astype(np.int64) + 2 * (y < 0).astype(np.int64),
+    }
+    for task, (gx, gy) in POINT_MASS_MAZE_GOALS.items():
+        factors[f"dist_{task}"] = np.hypot(x - gx, y - gy)
+    return factors
+
+
 POINT_MASS_MAZE = EnvSpec(
     name="point_mass_maze",
     suite="dmc",
     description="2D point mass in a four-goal maze (ExORL custom DMC task).",
-    tasks=("reach_top_left", "reach_top_right", "reach_bottom_left", "reach_bottom_right"),
+    tasks=tuple(POINT_MASS_MAZE_GOALS),
     action_type="continuous",
     observation_types=frozenset({"state", "pixels"}),
     datasets={"exorl_rnd": exorl_rnd_dataset("point_mass_maze")},
+    factors=point_mass_maze_factors,
+    probe_dataset="exorl_rnd",
     native_names={
         # FB pretrains on the domain's dataset and is evaluated zero-shot on every task.
         "onestep_fb": lambda task, obs_type: "exorl-rnd-point_mass_maze",

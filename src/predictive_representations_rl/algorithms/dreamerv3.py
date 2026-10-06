@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from predictive_representations_rl.algorithms.base import AlgorithmAdapter, AlgorithmSpec
+from predictive_representations_rl.algorithms.base import EXTRACT_DIR, AlgorithmAdapter, AlgorithmSpec
 from predictive_representations_rl.core.runtime import Command, Venv
 
 if TYPE_CHECKING:
@@ -56,6 +56,11 @@ class DreamerV3Adapter(AlgorithmAdapter):
             args += [f"--{key}", str(value)]
 
         return Command(args=tuple(args), cwd=run.root / REPO, env={"MUJOCO_GL": "egl", **run.config.environment})
+
+    def extract_command(self, run: ResolvedRun, checkpoint: Path, probes: Path, out_dir: Path) -> Command:
+        script = EXTRACT_DIR / "dreamerv3_extract.py"
+        args = (str(script), "--checkpoint", str(checkpoint), "--probes", str(probes), "--out", str(out_dir))
+        return Command(args=args, cwd=run.root / REPO, env={"MUJOCO_GL": "egl", **run.config.environment})
 
     def find_checkpoint(self, run: ResolvedRun) -> Path | None:
         checkpoint = run.native_dir / "checkpoint.ckpt"

@@ -1,9 +1,12 @@
 """Launch an algorithm's own training code for one (config, seed) and record the run in a standard directory.
 
 runs/<env>/<algo>/<mode>[/<task>]/seed_<N>/
-    run.json      resolved config, data source, experience budget, command, git commits, status
+    run.json      resolved config, data source, experience budget, command, git commits, status, extractions
     train.log     stdout + stderr of the algorithm process
     native/       everything the algorithm wrote itself (logs, checkpoints, replay), untouched
+    probes/<probe set>/<representation>.npz, metadata.npz, extract_info.json, extract.log
+
+runs/<env>/probes/<probe set>.npz    shared probe inputs, built once per environment
 """
 
 from __future__ import annotations
@@ -20,16 +23,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from predictive_representations_rl.algorithms.base import AlgorithmAdapter
 from predictive_representations_rl.core import registry
 from predictive_representations_rl.core.compat import check
 from predictive_representations_rl.core.config import ExperimentConfig
 from predictive_representations_rl.envs.base import EnvSpec
+from predictive_representations_rl.probes.probe_set import ProbeSet, build_from_exorl
 
 # Where runs go unless PRL_RUNS_DIR points elsewhere (e.g. scratch space).
 RUNS_DIR_VARIABLE = "PRL_RUNS_DIR"
 
 DEFAULT_RESOURCES = {"queue": "gpua100", "cores": 4, "mem_gb": 8, "gpus": 1, "walltime": "24:00"}
+
+DEFAULT_PROBES = {"num": 4096, "length": 16, "seed": 0}
 
 # A run directory in this state may be started without --force: it was created by `--submit lsf` for the job.
 STARTABLE = {"submitted"}
@@ -134,6 +142,71 @@ def submit_lsf(run: ResolvedRun, force: bool = False) -> str:
     record["lsf_job_id"] = job_id
     _write_record(run, record)
     return job_id
+
+
+def probe_set_path(root: Path, env: EnvSpec, name: str = "default") -> Path:
+    return runs_dir(root) / env.name / "probes" / f"{name}.npz"
+
+
+def build_probe_set(root: Path, env: EnvSpec, name: str = "default", force: bool = False, **params: int) -> Path:
+    """Cut a probe set from the environment's held-out probe file, once; every algorithm then reuses it."""
+    path = probe_set_path(root, env, name)
+    if path.exists() and not force:
+        return path
+
+    if env.probe_dataset is None or env.datasets[env.probe_dataset].probe_file is None:
+        raise RunError(f"{env.name} has no probe dataset; set EnvSpec.probe_dataset and DatasetSpec.probe_file")
+
+    probe_file = Path(env.datasets[env.probe_dataset].probe_file).expanduser()
+    if not probe_file.exists():
+        raise RunError(f"probe file not found: {probe_file}")
+
+    params = {**DEFAULT_PROBES, **params}
+    probe_set = build_from_exorl(probe_file, params["num"], params["length"], params["seed"], env.factors)
+    probe_set.save(path)
+    path.with_suffix(".json").write_text(json.dumps({"source": str(probe_file), **params}, indent=2) + "\n")
+    return path
+
+
+def extract(run: ResolvedRun, probe_name: str = "default", environment: dict[str, str] | None = None) -> dict[str, Any]:
+    """Run the algorithm's extraction script on the latest checkpoint and record it in run.json."""
+    record_path = run.run_dir / "run.json"
+    if not record_path.exists():
+        raise RunError(f"{run.run_dir} has no run.json; train it first")
+
+    checkpoint = run.adapter.find_checkpoint(run)
+    if checkpoint is None:
+        raise RunError(f"no checkpoint found under {run.native_dir}")
+
+    probes = probe_set_path(run.root, run.env, probe_name)
+    if not probes.exists():
+        raise RunError(f"probe set {probe_name!r} not found at {probes}; build it with `prl probes {run.env.name}`")
+
+    out_dir = run.run_dir / "probes" / probe_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    command = run.adapter.extract_command(run, checkpoint, probes, out_dir)
+    argv = run.adapter.spec.runtime.argv(command, run.root)
+
+    with open(out_dir / "extract.log", "wb") as log:
+        process = subprocess.run(argv, cwd=command.cwd, env={**os.environ, **command.env, **(environment or {})},
+                                 stdout=log, stderr=subprocess.STDOUT)
+    if process.returncode != 0:
+        raise RunError(f"extraction failed (exit {process.returncode}); see {out_dir / 'extract.log'}")
+
+    probe_set = ProbeSet.load(probes)
+    np.savez(out_dir / "metadata.npz", **probe_set.metadata)
+    info = json.loads((out_dir / "extract_info.json").read_text())
+
+    record = json.loads(record_path.read_text())
+    record.setdefault("extractions", {})[probe_name] = {
+        "at": _now(),
+        "probe_set": str(probes),
+        "checkpoint": str(checkpoint),
+        "representations": info["representations"],
+        "dir": str(out_dir),
+    }
+    _write_record(run, record)
+    return record["extractions"][probe_name]
 
 
 def _claim_run_dir(run: ResolvedRun, force: bool) -> None:

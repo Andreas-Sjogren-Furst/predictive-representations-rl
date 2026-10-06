@@ -8,7 +8,15 @@ from predictive_representations_rl.core import registry
 from predictive_representations_rl.core.compat import check
 from predictive_representations_rl.core.config import load_config
 from predictive_representations_rl.core.runtime import find_project_root
-from predictive_representations_rl.runner import RunError, command_line, resolve, run_locally, submit_lsf
+from predictive_representations_rl.runner import (
+    RunError,
+    build_probe_set,
+    command_line,
+    extract,
+    resolve,
+    run_locally,
+    submit_lsf,
+)
 
 
 def _list(what: str) -> int:
@@ -93,6 +101,41 @@ def _run(path: Path, seeds: list[int] | None, dry_run: bool, submit: str | None,
     return 1 if failed else 0
 
 
+def _probes(env_name: str, name: str, num: int, length: int, seed: int, force: bool) -> int:
+    root = find_project_root()
+    try:
+        path = build_probe_set(root, registry.get_env(env_name), name, force=force, num=num, length=length, seed=seed)
+    except (KeyError, RunError, ValueError) as error:
+        print(f"✗ {error}")
+        return 1
+    print(f"✓ probe set {name!r} for {env_name}: {path}")
+    return 0
+
+
+def _extract(path: Path, seeds: list[int] | None, probe_name: str, cpu: bool) -> int:
+    root = find_project_root()
+    environment = {"JAX_PLATFORMS": "cpu"} if cpu else {}
+    try:
+        config = load_config(path)
+        runs = [resolve(config, seed, root, path.resolve(), allow_missing=True) for seed in (seeds or config.seeds)]
+    except (KeyError, ValueError, OSError, RunError) as error:
+        print(f"✗ {path}: {error}")
+        return 1
+
+    failed = False
+    for run in runs:
+        try:
+            result = extract(run, probe_name, environment)
+        except (RunError, NotImplementedError) as error:
+            print(f"✗ {run.run_dir}: {error}")
+            failed = True
+            continue
+        shapes = ", ".join(f"{name} {'×'.join(map(str, shape))}" for name, shape in result["representations"].items())
+        print(f"✓ {run.run_dir}: {shapes}")
+
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="prl", description="Predictive-representations experiment harness.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -110,8 +153,26 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--submit", choices=["lsf"], help="Submit to the cluster instead of running here.")
     run_parser.add_argument("--force", action="store_true", help="Move an existing finished/failed run aside (seed_N.replaced-<time>) and run again.")
 
+    probes_parser = commands.add_parser("probes", help="Build the shared probe set for an environment.")
+    probes_parser.add_argument("env")
+    probes_parser.add_argument("--name", default="default")
+    probes_parser.add_argument("--num", type=int, default=4096, help="Number of probe states.")
+    probes_parser.add_argument("--length", type=int, default=16, help="Window length leading into each probe state.")
+    probes_parser.add_argument("--seed", type=int, default=0)
+    probes_parser.add_argument("--force", action="store_true", help="Rebuild even if it exists.")
+
+    extract_parser = commands.add_parser("extract", help="Extract representations of a trained run on a probe set.")
+    extract_parser.add_argument("config", type=Path)
+    extract_parser.add_argument("--seed", type=int, action="append", dest="seeds")
+    extract_parser.add_argument("--probes", default="default", help="Probe set name.")
+    extract_parser.add_argument("--cpu", action="store_true", help="Run extraction on CPU (JAX_PLATFORMS=cpu).")
+
     args = parser.parse_args(argv)
 
+    if args.command == "probes":
+        return _probes(args.env, args.name, args.num, args.length, args.seed, args.force)
+    if args.command == "extract":
+        return _extract(args.config, args.seeds, args.probes, args.cpu)
     if args.command == "list":
         return _list(args.what)
     if args.command == "run":
