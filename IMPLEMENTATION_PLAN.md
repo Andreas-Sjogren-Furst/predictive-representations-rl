@@ -172,20 +172,24 @@ uv run prl list   envs|algos|runs
 ## 6. Standard run directory
 
 ```text
-runs/
+runs/                                   # or $PRL_RUNS_DIR (e.g. scratch space)
 └── <environment>/
     └── <algorithm>/
-        └── <mode>/seed_<N>/
+        └── <mode>/[<task>/]seed_<N>/   # <task> only for single-task algorithms (Dreamer)
             ├── run.json            # resolved config + provenance (below)
-            ├── metrics.jsonl       # standardized metrics (train + eval)
+            ├── train.log           # stdout/stderr of the algorithm process
+            ├── job.lsf             # when submitted with --submit lsf
             ├── native/             # the repo's own logs/checkpoints, untouched
-            ├── probes/
+            ├── metrics.jsonl       # standardized metrics (train + eval)        [not yet]
+            ├── probes/                                                          [not yet]
             │   ├── <representation>.npz
             │   └── metadata.npz
-            └── analysis/
+            └── analysis/                                                        [not yet]
 ```
 
-`run.json` records: algorithm, mode, env, task(s), obs type, data source (path + hash), **transitions seen**, **environment steps taken**, **gradient steps**, seeds, the exact command line, runtime (venv/container), and the git commit of the harness and of each submodule. This is what makes later fairness comparisons possible without enforcing them now.
+A run directory is never reused: `--force` moves an existing run aside to `seed_<N>.replaced-<time>` (algorithms such as Dreamer would otherwise silently resume from the old checkpoint).
+
+`run.json` records: status/exit code/duration, algorithm, mode, data requirement, env, task, obs type, data source (dataset files or replay dir), **experience** as configured (env steps, dataset, gradient steps), seed, the exact command line and environment, runtime, host, LSF job id, the checkpoint found after training, and the git commit (+dirty flag) of the harness and of each submodule. This is what makes later fairness comparisons possible without enforcing them now.
 
 ---
 
@@ -289,8 +293,8 @@ python main.py --env_name=exorl-rnd-point_mass_maze --agent=agents/onestep_fb.py
 ### 10.2 Harness
 
 1. ✅ `AlgorithmSpec`, `EnvSpec`, registries, YAML configs, compatibility check (`prl check`, `prl list`).
-2. `Runtime` (venv first, container second) and `runner.py` that launches training and writes `run.json` + `native/`.
-3. Adapters: `onestep_fb` and `dreamerv3` (train command, checkpoint location, metrics translation).
+2. ✅ `Runtime` (venv, container) and `runner.py`: `prl run <config> [--seed N] [--dry-run] [--submit lsf] [--force]` launches training and writes `run.json`, `train.log`, `native/`.
+3. ✅ Adapters: `onestep_fb` and `dreamerv3` online (train command, checkpoint location, configured experience). Still to do: metrics translation to `metrics.jsonl`; Dreamer offline (passive) mode.
 4. Probe-set generator for point_mass_maze (sequences from the RND val split, metadata = x, y, velocities, goal distances).
 5. Extraction scripts for both algorithms → `probes/<representation>.npz`.
 6. PCA and linear-probe analysers; `prl analyze`.
@@ -301,7 +305,8 @@ python main.py --env_name=exorl-rnd-point_mass_maze --agent=agents/onestep_fb.py
 
 ## 11. Known issues / open questions
 
-- **Dreamer runtime on the HPC** is not set up yet (container vs. venv).
+- **Dreamer runtime**: Python 3.9 venv at `.venvs/dreamerv3`, built by `scripts/setup_dreamerv3_venv.sh` (DMC-only subset of the repo's Dockerfile; JAX 0.4.30, TF 2.16). Verified on CPU up to training + checkpoint; a full run still needs a GPU node.
+- **No GPU on login nodes**: both JAX installs probe CUDA at start-up; for CPU runs set `environment: {JAX_PLATFORMS: cpu}` in the config.
 - **FB is continuous-action only.** Discrete environments (e.g. a gridworld Four Rooms) need either a continuous variant or an FB change; deferred.
 - **Dreamer offline (passive) mode is not purely offline**: it steps a training env to pace updates and prefills its eval replay with a random policy. Fine for "run as is"; must be accounted for (and recorded in `run.json`) when comparing experience later.
 - **Different experience by default**: FB trains on ~5M RND transitions; Dreamer online collects its own. Recorded, not equalized, in milestone 1.

@@ -20,6 +20,10 @@ class ExperimentConfig:
     budget: dict[str, Any] = field(default_factory=dict)
     # Passed through unchanged to the algorithm's own command line.
     overrides: dict[str, Any] = field(default_factory=dict)
+    # Extra environment variables for the algorithm process (e.g. JAX_PLATFORMS: cpu).
+    environment: dict[str, str] = field(default_factory=dict)
+    # Cluster resources for `prl run --submit lsf`; see runner.DEFAULT_RESOURCES.
+    resources: dict[str, Any] = field(default_factory=dict)
 
 
 def load_config(path: Path) -> ExperimentConfig:

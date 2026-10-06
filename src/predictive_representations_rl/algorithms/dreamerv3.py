@@ -1,7 +1,18 @@
 from __future__ import annotations
 
-from predictive_representations_rl.algorithms.base import AlgorithmSpec
-from predictive_representations_rl.core.runtime import Venv
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from predictive_representations_rl.algorithms.base import AlgorithmAdapter, AlgorithmSpec
+from predictive_representations_rl.core.runtime import Command, Venv
+
+if TYPE_CHECKING:
+    from predictive_representations_rl.runner import ResolvedRun
+
+REPO = "third_party/Offline_vs_Online_in_MBRL"
+DEFAULT_ENV_STEPS = 250_000  # run.steps in dreamerv3/configs.yaml
+# The repo's config block per suite and observation type.
+CONFIGS = {("dmc", "state"): "dmc_proprio", ("dmc", "pixels"): "dmc_vision"}
 
 DREAMERV3 = AlgorithmSpec(
     name="dreamerv3",
@@ -16,3 +27,44 @@ DREAMERV3 = AlgorithmSpec(
     # Built by scripts/setup_dreamerv3_venv.sh (the repo itself recommends its Singularity image).
     runtime=Venv(".venvs/dreamerv3"),
 )
+
+
+class DreamerV3Adapter(AlgorithmAdapter):
+    spec = DREAMERV3
+
+    def train_command(self, run: ResolvedRun) -> Command:
+        if run.config.mode != "online":
+            raise NotImplementedError("dreamerv3 offline (passive) runs are not wired into the harness yet")
+
+        suite_config = CONFIGS.get((run.env.suite, run.config.obs_type))
+        if suite_config is None:
+            raise ValueError(f"no DreamerV3 config for suite {run.env.suite!r} with {run.config.obs_type!r} observations")
+
+        flags: dict[str, Any] = {
+            "task": run.native_env_name,
+            "logdir": run.native_dir,
+            "seed": run.seed,
+            "run.steps": int(run.config.budget.get("env_steps", DEFAULT_ENV_STEPS)),
+            # Plain Dreamer, as loops_auto.sh runs it without Plan2Explore.
+            "method": "pure_dreamer",
+            "expl_behavior": "None",
+            **run.config.overrides,
+        }
+
+        args = ["dreamerv3/train.py", "--configs", suite_config]
+        for key, value in flags.items():
+            args += [f"--{key}", str(value)]
+
+        return Command(args=tuple(args), cwd=run.root / REPO, env={"MUJOCO_GL": "egl", **run.config.environment})
+
+    def find_checkpoint(self, run: ResolvedRun) -> Path | None:
+        checkpoint = run.native_dir / "checkpoint.ckpt"
+        return checkpoint if checkpoint.exists() else None
+
+    def experience(self, run: ResolvedRun) -> dict[str, Any]:
+        return {
+            "env_steps": int(run.config.budget.get("env_steps", DEFAULT_ENV_STEPS)),
+            "dataset": None,
+            # Dreamer trains at a replay ratio (run.train_ratio) during collection; the count is in its metrics.
+            "gradient_steps": None,
+        }

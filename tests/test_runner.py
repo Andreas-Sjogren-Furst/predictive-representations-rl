@@ -1,0 +1,181 @@
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+from predictive_representations_rl import runner
+from predictive_representations_rl.algorithms.base import AlgorithmAdapter, AlgorithmSpec
+from predictive_representations_rl.core import registry
+from predictive_representations_rl.core.config import ExperimentConfig
+from predictive_representations_rl.core.runtime import Command, Venv
+from predictive_representations_rl.envs.base import EnvSpec
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class FakeAdapter(AlgorithmAdapter):
+    """Runs a tiny Python program that writes a checkpoint, or exits with the code in overrides['exit']."""
+
+    spec = AlgorithmSpec(
+        name="fake",
+        description="test algorithm",
+        modes={"online": "self_collected"},
+        action_spaces=frozenset({"continuous"}),
+        observation_types=frozenset({"state"}),
+        representations=("z",),
+        stateful_representation=False,
+        task_specific=False,
+        runtime=Venv("venv"),
+    )
+
+    def train_command(self, run):
+        code = (
+            "import os, pathlib, sys;"
+            f"pathlib.Path({str(run.native_dir)!r}, 'model.ckpt').write_text('weights');"
+            "print('training', os.environ['FAKE_FLAG']);"
+            f"sys.exit({int(run.config.overrides.get('exit', 0))})"
+        )
+        return Command(args=("-c", code), cwd=run.root, env={"FAKE_FLAG": "on"})
+
+    def find_checkpoint(self, run):
+        path = run.native_dir / "model.ckpt"
+        return path if path.exists() else None
+
+    def experience(self, run):
+        return {"env_steps": run.config.budget.get("env_steps", 0)}
+
+
+@pytest.fixture
+def root(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").touch()
+    (tmp_path / "third_party").mkdir()
+    (tmp_path / "venv" / "bin").mkdir(parents=True)
+    (tmp_path / "venv" / "bin" / "python").symlink_to(sys.executable)
+
+    env = EnvSpec(
+        name="toy", suite="test", tasks=("a",), action_type="continuous",
+        observation_types=frozenset({"state"}), native_names={"fake": lambda task, obs: "toy-native"},
+    )
+    monkeypatch.setitem(registry.ENVS, "toy", env)
+    monkeypatch.setitem(registry.ADAPTERS, "fake", FakeAdapter())
+    monkeypatch.delenv(runner.RUNS_DIR_VARIABLE, raising=False)
+    return tmp_path
+
+
+def fake_config(**kwargs):
+    return ExperimentConfig(env="toy", algo="fake", mode="online", budget={"env_steps": 10}, **kwargs)
+
+
+def test_run_directory_layout(root):
+    run = runner.resolve(fake_config(), seed=3, root=root)
+
+    assert run.run_dir == root / "runs" / "toy" / "fake" / "online" / "seed_3"
+    assert run.native_dir == run.run_dir / "native"
+    assert run.native_env_name == "toy-native"
+
+
+def test_runs_dir_can_point_elsewhere(root, tmp_path, monkeypatch):
+    monkeypatch.setenv(runner.RUNS_DIR_VARIABLE, str(tmp_path / "scratch"))
+
+    assert runner.resolve(fake_config(), seed=0, root=root).run_dir.is_relative_to(tmp_path / "scratch")
+
+
+def test_run_locally_records_a_completed_run(root):
+    run = runner.resolve(fake_config(), seed=0, root=root)
+
+    record = runner.run_locally(run)
+
+    on_disk = json.loads((run.run_dir / "run.json").read_text())
+    assert json.loads(json.dumps(record, default=str)) == on_disk
+    assert record["status"] == "completed" and record["exit_code"] == 0
+    assert record["checkpoint"] == str(run.native_dir / "model.ckpt")
+    assert record["experience"] == {"env_steps": 10}
+    assert record["algorithm"]["data_requirement"] == "self_collected"
+    assert record["command"]["env"] == {"FAKE_FLAG": "on"}
+    assert "." in record["git"]
+    assert "training on" in (run.run_dir / "train.log").read_text()
+
+
+def test_failed_run_is_recorded(root):
+    run = runner.resolve(fake_config(overrides={"exit": 3}), seed=0, root=root)
+
+    record = runner.run_locally(run)
+
+    assert record["status"] == "failed" and record["exit_code"] == 3
+
+
+def test_finished_run_is_not_overwritten(root):
+    run = runner.resolve(fake_config(), seed=0, root=root)
+    runner.run_locally(run)
+
+    with pytest.raises(runner.RunError, match="already has a completed run"):
+        runner.run_locally(run)
+
+
+def test_force_moves_the_previous_run_aside(root):
+    run = runner.resolve(fake_config(), seed=0, root=root)
+    runner.run_locally(run)
+
+    runner.run_locally(run, force=True)
+
+    replaced = list(run.run_dir.parent.glob("seed_0.replaced-*"))
+    assert len(replaced) == 1 and (replaced[0] / "run.json").exists()
+    assert json.loads((run.run_dir / "run.json").read_text())["status"] == "completed"
+
+
+def test_submitted_run_can_be_started_by_its_job(root):
+    run = runner.resolve(fake_config(), seed=0, root=root)
+    run.run_dir.mkdir(parents=True)
+    (run.run_dir / "run.json").write_text(json.dumps({"status": "submitted"}))
+
+    assert runner.run_locally(run)["status"] == "completed"
+
+
+def test_incompatible_config_is_rejected(root):
+    with pytest.raises(runner.RunError, match="does not support 'offline'"):
+        runner.resolve(ExperimentConfig(env="toy", algo="fake", mode="offline"), seed=0, root=root)
+
+
+def test_lsf_script(root):
+    run = runner.resolve(fake_config(resources={"queue": "gpuv100", "gpus": 1}), seed=2, root=root, config_path=root / "exp.yaml")
+
+    script = runner._lsf_script(run)
+
+    assert "#BSUB -q gpuv100" in script
+    assert '#BSUB -gpu "num=1:mode=exclusive_process"' in script
+    assert f"run {root / 'exp.yaml'} --seed 2" in script
+
+
+def test_onestep_fb_command():
+    config = ExperimentConfig(
+        env="point_mass_maze", algo="onestep_fb", mode="offline", dataset="exorl_rnd",
+        budget={"train_steps": 2000}, overrides={"agent.latent_dim": 50},
+    )
+    run = runner.resolve(config, seed=1, root=PROJECT_ROOT, allow_missing=True)
+
+    argv, env, cwd = runner.command_line(run)
+
+    assert argv[0].endswith("third_party/onestep-fb/.venv/bin/python") and argv[1] == "main.py"
+    assert "--env_name=exorl-rnd-point_mass_maze" in argv
+    assert f"--save_dir={run.native_dir}" in argv
+    assert "--train_steps=2000" in argv and "--save_interval=2000" in argv
+    assert "--agent.latent_dim=50" in argv
+    assert cwd == PROJECT_ROOT / "third_party" / "onestep-fb"
+
+
+def test_dreamerv3_command():
+    config = ExperimentConfig(
+        env="point_mass_maze", algo="dreamerv3", mode="online", task="reach_top_left",
+        budget={"env_steps": 1500}, overrides={"run.train_ratio": 64},
+    )
+    run = runner.resolve(config, seed=0, root=PROJECT_ROOT, allow_missing=True)
+
+    argv, env, cwd = runner.command_line(run)
+    flags = dict(zip(argv[2::2], argv[3::2]))
+
+    assert argv[1] == "dreamerv3/train.py"
+    assert flags["--configs"] == "dmc_proprio"
+    assert flags["--task"] == "dmc_point_mass_maze_reach_top_left"
+    assert flags["--logdir"] == str(run.native_dir)
+    assert flags["--run.steps"] == "1500" and flags["--run.train_ratio"] == "64"

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
-from predictive_representations_rl.core.runtime import Runtime
+from predictive_representations_rl.core.runtime import Command, Runtime
+
+if TYPE_CHECKING:
+    from predictive_representations_rl.runner import ResolvedRun
 
 LearningMode = Literal["online", "offline"]
 
@@ -30,3 +35,21 @@ class AlgorithmSpec:
     # True if training optimises a single task's reward; False if it pretrains task-agnostically.
     task_specific: bool
     runtime: Runtime
+
+
+class AlgorithmAdapter(ABC):
+    """How to run an algorithm: builds its native command line and finds what it wrote. No learning happens here."""
+
+    spec: AlgorithmSpec
+
+    @abstractmethod
+    def train_command(self, run: ResolvedRun) -> Command:
+        """The algorithm's own training entry point, writing its outputs under `run.native_dir`."""
+
+    @abstractmethod
+    def find_checkpoint(self, run: ResolvedRun) -> Path | None:
+        """The latest checkpoint the algorithm wrote, if any."""
+
+    @abstractmethod
+    def experience(self, run: ResolvedRun) -> dict[str, Any]:
+        """How much data and compute the run is configured to use (env steps, dataset, gradient steps)."""

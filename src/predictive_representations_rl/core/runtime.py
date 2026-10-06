@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -16,6 +17,15 @@ def find_project_root(start: Path | None = None) -> Path:
 
 
 @dataclass(frozen=True)
+class Command:
+    """A Python invocation inside an algorithm's runtime: `python <args>` run from `cwd`."""
+
+    args: tuple[str, ...]
+    cwd: Path
+    env: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Venv:
     """A Python virtual environment, given relative to the project root."""
 
@@ -23,6 +33,9 @@ class Venv:
 
     def python(self, root: Path) -> Path:
         return root / self.path / "bin" / "python"
+
+    def argv(self, command: Command, root: Path) -> list[str]:
+        return [str(self.python(root)), *command.args]
 
     def problems(self, root: Path) -> list[str]:
         if not self.python(root).exists():
@@ -38,6 +51,9 @@ class Container:
 
     def image_path(self, root: Path) -> Path:
         return (root / self.image).expanduser()
+
+    def argv(self, command: Command, root: Path) -> list[str]:
+        return ["singularity", "exec", "--nv", "--bind", str(root), str(self.image_path(root)), "python", *command.args]
 
     def problems(self, root: Path) -> list[str]:
         if not self.image_path(root).exists():
