@@ -30,11 +30,33 @@ class ExperimentConfig:
     resources: dict[str, Any] = field(default_factory=dict)
 
 
-def load_config(path: Path) -> ExperimentConfig:
-    raw = yaml.safe_load(Path(path).read_text()) or {}
+# Keys whose mappings are merged key by key when a config extends another; every other key is replaced.
+MERGED_KEYS = ("budget", "overrides", "environment", "extract", "resources")
 
+
+def read_raw(path: Path, _seen: tuple[Path, ...] = ()) -> dict[str, Any]:
+    """A config file's mapping, with `extends: <path relative to this file>` resolved."""
+    path = Path(path).resolve()
+    if path in _seen:
+        raise ValueError(f"{path}: circular extends")
+
+    raw = yaml.safe_load(path.read_text()) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: expected a mapping at the top level")
+
+    base_path = raw.pop("extends", None)
+    if base_path is None:
+        return raw
+
+    base = read_raw(path.parent / base_path, (*_seen, path))
+    for key in MERGED_KEYS:
+        if key in raw and key in base:
+            raw[key] = {**base[key], **(raw[key] or {})}
+    return {**base, **raw}
+
+
+def load_config(path: Path) -> ExperimentConfig:
+    raw = read_raw(path)
 
     known = {f.name for f in fields(ExperimentConfig)}
     unknown = set(raw) - known

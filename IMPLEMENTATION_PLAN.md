@@ -169,6 +169,8 @@ uv run prl list   envs|algos|runs
 
 ---
 
+Configs can build on each other: `extends: <path relative to this file>` starts from another config; the option blocks (`budget`, `overrides`, `environment`, `extract`, `resources`) are merged key by key and everything else is replaced. Sweeps are a folder of small variant configs, e.g. `configs/point_mass_maze/onestep_fb_alpha/alpha0.3.yaml` = the base FB config with `variant: alpha0.3` and `agent.alpha: 0.3`.
+
 ## 6. Standard run directory
 
 ```text

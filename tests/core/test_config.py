@@ -61,3 +61,30 @@ def test_variant_must_be_a_plain_name(tmp_path, variant):
 
     with pytest.raises(ValueError, match="variant"):
         load_config(path)
+
+
+def test_extends_merges_option_blocks_and_replaces_the_rest(tmp_path):
+    (tmp_path / "base.yaml").write_text(
+        "env: point_mass_maze\nalgo: onestep_fb\nmode: offline\ndataset: exorl_rnd\n"
+        "budget: {train_steps: 1000}\noverrides: {agent.alpha: 0, agent.latent_dim: 50}\n"
+        "resources: {queue: gpua100, walltime: '24:00'}\n"
+    )
+    (tmp_path / "sweep").mkdir()
+    (tmp_path / "sweep" / "a.yaml").write_text(
+        "extends: ../base.yaml\nvariant: alpha0.3\noverrides: {agent.alpha: 0.3}\nresources: {queue: gpul40s}\n"
+    )
+
+    config = load_config(tmp_path / "sweep" / "a.yaml")
+
+    assert config.variant == "alpha0.3" and config.dataset == "exorl_rnd"
+    assert config.overrides == {"agent.alpha": 0.3, "agent.latent_dim": 50}
+    assert config.resources == {"queue": "gpul40s", "walltime": "24:00"}
+    assert config.budget == {"train_steps": 1000}
+
+
+def test_circular_extends_is_an_error(tmp_path):
+    (tmp_path / "a.yaml").write_text("extends: b.yaml\n")
+    (tmp_path / "b.yaml").write_text("extends: a.yaml\n")
+
+    with pytest.raises(ValueError, match="circular"):
+        load_config(tmp_path / "a.yaml")
