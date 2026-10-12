@@ -165,7 +165,7 @@ def test_lsf_script(root):
     script = runner._lsf_script(run)
 
     assert "#BSUB -q gpuv100" in script
-    assert '#BSUB -gpu "num=1:mode=shared"' in script
+    assert '#BSUB -gpu "num=1:mode=shared:j_exclusive=yes"' in script
     assert f"export PRL_RUNS_DIR={root / 'runs'}" in script
     assert f"run {root / 'exp.yaml'} --seed 2" in script
 

@@ -391,9 +391,10 @@ def _lsf_script(run: ResolvedRun) -> str:
         f"#BSUB -e {run.run_dir}/lsf_%J.out",
     ]
     if resources["gpus"]:
-        # Shared, not exclusive_process: algorithms may use the GPU from several processes (e.g. Dreamer's
-        # environment workers render through EGL); exclusive mode lets only the first one in, and the rest hang.
-        lines.append(f'#BSUB -gpu "num={resources["gpus"]}:mode=shared"')
+        # mode=shared lets several processes of this job use the GPU (Dreamer's environment workers render through
+        # EGL; exclusive_process lets only the first one in and the rest hang). j_exclusive=yes keeps the GPU to this
+        # job: without it LSF puts other jobs on the same GPU, and JAX's 75% memory preallocation then fails.
+        lines.append(f'#BSUB -gpu "num={resources["gpus"]}:mode=shared:j_exclusive=yes"')
     lines += [
         "",
         # DTU's LSF does not forward the submitting shell's environment, so pass the runs location explicitly.
