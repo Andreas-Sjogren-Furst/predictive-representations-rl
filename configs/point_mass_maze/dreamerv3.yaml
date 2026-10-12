@@ -8,6 +8,9 @@ seeds: [0]
 budget:
   env_steps: 500_000
 overrides: {}
+# Deterministic posterior for extraction: with sampled z, two extractions of the trained model differed by
+# 0.20 (h) / 0.64 (z) of the spread across probes (sampling_noise, 2026-10-13), above the 0.1 threshold.
+extract: {posterior: mode}
 resources:
   queue: gpul40s     # gpua100 was saturated for days; the L40S queue allows up to 48 h
   walltime: "48:00"  # generous: the smoke test measured ~63 steps/s, i.e. ~2.5-3 h for 500k steps
