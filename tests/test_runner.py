@@ -341,3 +341,17 @@ def test_status_marks_vanished_cluster_jobs_lost(root, monkeypatch):
     assert json.loads(queued.read_text())["status"] == "submitted" and rows["seed_1"]["lsf_state"] == "PEND"
     assert json.loads(local.read_text())["status"] == "running"  # no LSF job to check
     assert rows["seed_4"]["status"] == "completed" and rows["seed_4"]["lsf_state"] is None
+
+
+def test_dreamerv3_uses_onestep_fb_task_definitions():
+    from predictive_representations_rl.algorithms.dreamerv3 import TASK_OVERRIDES
+
+    config = ExperimentConfig(env="point_mass_maze", algo="dreamerv3", mode="online", task="reach_top_left")
+    run = runner.resolve(config, seed=0, root=PROJECT_ROOT, allow_missing=True)
+
+    for command in (run.adapter.train_command(run), run.adapter.extract_command(run, Path("c"), Path("p"), Path("o"))):
+        assert command.env["PYTHONPATH"] == str(TASK_OVERRIDES)
+    shim = TASK_OVERRIDES / "custom_dmc_tasks" / "__init__.py"
+    assert shim.exists()
+    # The shim locates onestep-fb relative to itself (parents[5] is the project root).
+    assert (shim.resolve().parents[5] / "third_party" / "onestep-fb" / "envs" / "custom_dmc_tasks" / "point_mass_maze.py").exists()

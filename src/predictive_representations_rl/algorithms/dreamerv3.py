@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     from predictive_representations_rl.runner import ResolvedRun
 
 REPO = "third_party/Offline_vs_Online_in_MBRL"
+# Shadows the repo's custom_dmc_tasks with onestep-fb's ExORL task definitions (see that package's docstring).
+TASK_OVERRIDES = Path(__file__).resolve().parents[1] / "overrides" / "dreamerv3"
 DEFAULT_ENV_STEPS = 250_000  # run.steps in dreamerv3/configs.yaml
 # The repo's config block per suite and observation type.
 CONFIGS = {("dmc", "state"): "dmc_proprio", ("dmc", "pixels"): "dmc_vision"}
@@ -55,7 +57,7 @@ class DreamerV3Adapter(AlgorithmAdapter):
         for key, value in flags.items():
             args += [f"--{key}", str(value)]
 
-        return Command(args=tuple(args), cwd=run.root / REPO, env={"MUJOCO_GL": "egl", **run.config.environment})
+        return Command(args=tuple(args), cwd=run.root / REPO, env=self._env(run))
 
     def extract_command(self, run: ResolvedRun, checkpoint: Path, probes: Path, out_dir: Path) -> Command:
         options = dict(run.config.extract)
@@ -68,7 +70,10 @@ class DreamerV3Adapter(AlgorithmAdapter):
         script = EXTRACT_DIR / "dreamerv3_extract.py"
         args = (str(script), "--checkpoint", str(checkpoint), "--probes", str(probes), "--out", str(out_dir),
                 "--posterior", posterior)
-        return Command(args=args, cwd=run.root / REPO, env={"MUJOCO_GL": "egl", **run.config.environment})
+        return Command(args=args, cwd=run.root / REPO, env=self._env(run))
+
+    def _env(self, run: ResolvedRun) -> dict[str, str]:
+        return {"PYTHONPATH": str(TASK_OVERRIDES), "MUJOCO_GL": "egl", **run.config.environment}
 
     def find_checkpoint(self, run: ResolvedRun) -> Path | None:
         checkpoint = run.native_dir / "checkpoint.ckpt"

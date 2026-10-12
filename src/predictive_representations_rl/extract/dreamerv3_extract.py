@@ -28,7 +28,8 @@ from pathlib import Path
 import numpy as np
 
 REPO = Path.cwd()
-sys.path[:0] = [str(REPO / "dreamerv3"), str(REPO)]
+# Appended, as train.py does, so the task-definition override on PYTHONPATH keeps precedence.
+sys.path += [str(REPO / "dreamerv3"), str(REPO)]
 
 import embodied  # noqa: E402
 from dreamerv3 import agent as agt  # noqa: E402
