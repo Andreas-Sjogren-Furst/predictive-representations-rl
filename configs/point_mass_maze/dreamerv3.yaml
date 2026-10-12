@@ -9,4 +9,5 @@ budget:
   env_steps: 500_000
 overrides: {}
 resources:
-  walltime: "48:00"  # 500k env steps at train_ratio 512 can approach 24 h
+  queue: gpul40s     # gpua100 was saturated for days; the L40S queue allows up to 48 h
+  walltime: "48:00"  # generous: the smoke test measured ~63 steps/s, i.e. ~2.5-3 h for 500k steps
