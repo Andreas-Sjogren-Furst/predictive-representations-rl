@@ -6,5 +6,5 @@ variant: alpha0.1
 overrides:
   agent.alpha: 0.1
 resources:
-  queue: gpul40s     # schedules much faster than gpua100
+  queue: gpuv100     # sweep spread over gpul40s and gpuv100 (one free GPU per job is scarce)
   walltime: "6:00"   # the alpha=0 run took 1.4-2.8 h
