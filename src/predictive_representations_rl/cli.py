@@ -18,6 +18,7 @@ from predictive_representations_rl.runner import (
     extract,
     resolve,
     run_locally,
+    status,
     submit_lsf,
 )
 
@@ -188,6 +189,19 @@ def _analyze(paths: list[Path], seeds: list[int] | None, probe_name: str, analys
     return 1 if failed else 0
 
 
+def _status() -> int:
+    rows = status(find_project_root())
+    if not rows:
+        print("no runs recorded")
+        return 0
+    width = max(len(row["run"]) for row in rows)
+    for row in rows:
+        job = f"LSF {row['lsf_job_id']}: {row['lsf_state'] or 'gone'}" if row["lsf_state"] or row["status"] == "lost" else ""
+        duration = f"{row['duration_s'] / 3600:.1f} h" if row["duration_s"] else ""
+        print(f"{row['run']:<{width}}  {row['status']:<10} {duration:>7}  {job}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="prl", description="Predictive-representations experiment harness.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -225,7 +239,12 @@ def main(argv: list[str] | None = None) -> int:
     analyze_parser.add_argument("--probes", default="default", help="Probe set name.")
     analyze_parser.add_argument("--analysis", help="Comma-separated analyses (default: all): pca,linear_probe,cka")
 
+    commands.add_parser("status", help="List recorded runs; mark cluster runs whose job has vanished as lost.")
+
     args = parser.parse_args(argv)
+
+    if args.command == "status":
+        return _status()
 
     if args.command == "analyze":
         return _analyze(args.configs, args.seeds, args.probes, args.analysis)

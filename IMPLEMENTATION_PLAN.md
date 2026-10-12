@@ -175,7 +175,8 @@ uv run prl list   envs|algos|runs
 runs/                                   # or $PRL_RUNS_DIR (e.g. scratch space)
 └── <environment>/
     └── <algorithm>/
-        └── <mode>/[<task>/]seed_<N>/   # <task> only for single-task algorithms (Dreamer)
+        └── <mode>/[<task>/][<variant>/]seed_<N>/   # <task> only for single-task algorithms (Dreamer);
+                                                  # <variant> from the config's optional `variant` key
             ├── run.json            # resolved config + provenance (below)
             ├── train.log           # stdout/stderr of the algorithm process
             ├── job.lsf             # when submitted with --submit lsf
@@ -314,6 +315,12 @@ python main.py --env_name=exorl-rnd-point_mass_maze --agent=agents/onestep_fb.py
 ## 11. Known issues / open questions
 
 - **Dreamer runtime**: Python 3.9 venv at `.venvs/dreamerv3`, built by `scripts/setup_dreamerv3_venv.sh` (DMC-only subset of the repo's Dockerfile; JAX 0.4.30, TF 2.16). Verified on CPU up to training + checkpoint; a full run still needs a GPU node.
+- **Cluster runs (lessons from the first Dreamer GPU run, which hung for 48 h after start-up)**:
+  - GPUs are requested with `mode=shared`: Dreamer's environment workers are separate processes that render through EGL on the GPU, and `exclusive_process` lets only the first process use it. Rendering cannot be switched off for state-only Dreamer runs without changing the repo (`env.dmc.render` is not a config key).
+  - Algorithm processes run with `PYTHONUNBUFFERED=1`, so `train.log` shows progress even when a job is killed.
+  - `prl status` lists every run with its LSF state and marks in-flight runs whose job vanished or ended without finalising `run.json` as `lost`.
+  - `PRL_RUNS_DIR` is exported into job scripts (DTU's LSF does not forward the environment).
+  - Before a long run, a short `variant: smoke` config on a less busy queue (see `configs/point_mass_maze/dreamerv3_smoke.yaml`).
 - **No GPU on login nodes**: both JAX installs probe CUDA at start-up; for CPU runs set `environment: {JAX_PLATFORMS: cpu}` in the config.
 - **FB is continuous-action only.** Discrete environments (e.g. a gridworld Four Rooms) need either a continuous variant or an FB change; deferred.
 - **Dreamer offline (passive) mode is not purely offline**: it steps a training env to pace updates and prefills its eval replay with a random policy. Fine for "run as is"; must be accounted for (and recorded in `run.json`) when comparing experience later.

@@ -1,6 +1,6 @@
 """Launch an algorithm's own training code for one (config, seed) and record the run in a standard directory.
 
-runs/<env>/<algo>/<mode>[/<task>]/seed_<N>/
+runs/<env>/<algo>/<mode>[/<task>][/<variant>]/seed_<N>/
     run.json      resolved config, data source, experience budget, command, git commits, status, extractions
     train.log     stdout + stderr of the algorithm process
     native/       everything the algorithm wrote itself (logs, checkpoints, replay), untouched
@@ -91,6 +91,8 @@ def resolve(
     run_dir = runs_dir(root) / config.env / config.algo / config.mode
     if config.task is not None:
         run_dir /= config.task
+    if config.variant is not None:
+        run_dir /= config.variant
     run_dir /= f"seed_{seed}"
 
     return ResolvedRun(config, config_path, seed, env, adapter, root, run_dir)
@@ -110,7 +112,7 @@ def run_locally(run: ResolvedRun, force: bool = False) -> dict[str, Any]:
 
     started = time.monotonic()
     with open(run.run_dir / "train.log", "ab") as log:
-        process = subprocess.run(argv, cwd=cwd, env={**os.environ, **env}, stdout=log, stderr=subprocess.STDOUT)
+        process = subprocess.run(argv, cwd=cwd, env=_process_env(env), stdout=log, stderr=subprocess.STDOUT)
 
     checkpoint = run.adapter.find_checkpoint(run)
     record.update(
@@ -193,7 +195,7 @@ def extract(run: ResolvedRun, probe_name: str = "default", environment: dict[str
     argv = run.adapter.spec.runtime.argv(command, run.root)
 
     with open(out_dir / "extract.log", "wb") as log:
-        process = subprocess.run(argv, cwd=command.cwd, env={**os.environ, **command.env, **(environment or {})},
+        process = subprocess.run(argv, cwd=command.cwd, env=_process_env({**command.env, **(environment or {})}),
                                  stdout=log, stderr=subprocess.STDOUT)
     if process.returncode != 0:
         raise RunError(f"extraction failed (exit {process.returncode}); see {out_dir / 'extract.log'}")
@@ -275,7 +277,7 @@ def compare_linear_probes(runs: list[ResolvedRun], probe_name: str = "default") 
 
 
 def run_label(run: ResolvedRun) -> str:
-    return "/".join(filter(None, [run.config.algo, run.config.task, f"seed_{run.seed}"]))
+    return "/".join(filter(None, [run.config.algo, run.config.task, run.config.variant, f"seed_{run.seed}"]))
 
 
 def compare_cka(runs: list[ResolvedRun], probe_name: str = "default") -> Path:
@@ -375,7 +377,7 @@ def _git_commits(root: Path) -> dict[str, str | None]:
 
 def _lsf_script(run: ResolvedRun) -> str:
     resources = {**DEFAULT_RESOURCES, **run.config.resources}
-    name = f"{run.config.algo}_{run.config.env}_s{run.seed}"
+    name = "_".join(filter(None, [run.config.algo, run.config.env, run.config.variant, f"s{run.seed}"]))
     prl = Path(sys.executable).parent / "prl"
     lines = [
         "#!/bin/bash",
@@ -389,14 +391,70 @@ def _lsf_script(run: ResolvedRun) -> str:
         f"#BSUB -e {run.run_dir}/lsf_%J.out",
     ]
     if resources["gpus"]:
-        lines.append(f'#BSUB -gpu "num={resources["gpus"]}:mode=exclusive_process"')
+        # Shared, not exclusive_process: algorithms may use the GPU from several processes (e.g. Dreamer's
+        # environment workers render through EGL); exclusive mode lets only the first one in, and the rest hang.
+        lines.append(f'#BSUB -gpu "num={resources["gpus"]}:mode=shared"')
     lines += [
         "",
+        # DTU's LSF does not forward the submitting shell's environment, so pass the runs location explicitly.
+        f"export {RUNS_DIR_VARIABLE}={shlex.quote(str(runs_dir(run.root)))}",
         f"cd {shlex.quote(str(run.root))}",
         f"{shlex.quote(str(prl))} run {shlex.quote(str(run.config_path))} --seed {run.seed}",
         "",
     ]
     return "\n".join(lines)
+
+
+# Recorded states of a run that should still have a live LSF job behind it.
+IN_FLIGHT = {"submitted", "running"}
+
+
+def status(root: Path) -> list[dict[str, Any]]:
+    """Every recorded run with its LSF state; in-flight runs whose job has vanished or ended are marked `lost`.
+
+    A job killed from outside (walltime, bkill, node failure) never gets to finalise its run.json, so without this
+    check it would look `running` forever.
+    """
+    records = sorted(runs_dir(root).glob("**/run.json"))
+    loaded = [(path, json.loads(path.read_text())) for path in records]
+    job_ids = [record["lsf_job_id"] for _, record in loaded if record.get("status") in IN_FLIGHT and record.get("lsf_job_id")]
+    states = _lsf_states(job_ids) if job_ids else {}
+
+    rows = []
+    for path, record in loaded:
+        job_id = record.get("lsf_job_id")
+        lsf_state = states.get(job_id) if job_id in job_ids else None
+        if record.get("status") in IN_FLIGHT and job_id in job_ids and lsf_state in (None, "DONE", "EXIT"):
+            record.update(status="lost", lost_at=_now(), lsf_state=lsf_state or "not found")
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(record, indent=2, default=str) + "\n")
+            tmp.replace(path)
+        rows.append({
+            "run": str(path.parent.relative_to(runs_dir(root))),
+            "status": record.get("status"),
+            "lsf_job_id": job_id,
+            "lsf_state": lsf_state if job_id in job_ids else None,
+            "started_at": record.get("started_at"),
+            "duration_s": record.get("duration_s"),
+        })
+    return rows
+
+
+def _lsf_states(job_ids: list[str]) -> dict[str, str]:
+    """LSF state (PEND, RUN, DONE, EXIT, ...) of each job LSF still knows about."""
+    output = subprocess.run(["bjobs", "-a", "-noheader", "-o", "jobid stat", *job_ids], capture_output=True, text=True,
+                            env=_lsf_environment())
+    states = {}
+    for line in output.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit():
+            states[parts[0]] = parts[1]
+    return states
+
+
+def _process_env(extra: dict[str, str]) -> dict[str, str]:
+    """Environment for an algorithm process. Unbuffered output, so train.log shows progress even if the job is killed."""
+    return {**os.environ, "PYTHONUNBUFFERED": "1", **extra}
 
 
 def _lsf_environment() -> dict[str, str]:

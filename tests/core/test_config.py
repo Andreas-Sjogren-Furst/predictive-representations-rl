@@ -52,3 +52,12 @@ def test_shipped_configs_are_compatible(path):
 
     # Datasets and runtimes may not be on this machine; the config itself must be valid.
     assert [issue for issue in issues if issue.kind == "incompatible"] == []
+
+
+@pytest.mark.parametrize("variant", ["", "../x", "a/b", ".hidden", 3])
+def test_variant_must_be_a_plain_name(tmp_path, variant):
+    path = tmp_path / "exp.yaml"
+    path.write_text(f"env: point_mass_maze\nalgo: onestep_fb\nmode: offline\nvariant: {variant!r}\n")
+
+    with pytest.raises(ValueError, match="variant"):
+        load_config(path)

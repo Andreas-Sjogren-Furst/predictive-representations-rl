@@ -90,6 +90,13 @@ def test_run_directory_layout(root):
     assert run.native_env_name == "toy-native"
 
 
+def test_variant_gets_its_own_run_directory(root):
+    run = runner.resolve(fake_config(variant="smoke"), seed=1, root=root)
+
+    assert run.run_dir == root / "runs" / "toy" / "fake" / "online" / "smoke" / "seed_1"
+    assert runner.run_label(run) == "fake/smoke/seed_1"
+
+
 def test_runs_dir_can_point_elsewhere(root, tmp_path, monkeypatch):
     monkeypatch.setenv(runner.RUNS_DIR_VARIABLE, str(tmp_path / "scratch"))
 
@@ -158,7 +165,8 @@ def test_lsf_script(root):
     script = runner._lsf_script(run)
 
     assert "#BSUB -q gpuv100" in script
-    assert '#BSUB -gpu "num=1:mode=exclusive_process"' in script
+    assert '#BSUB -gpu "num=1:mode=shared"' in script
+    assert f"export PRL_RUNS_DIR={root / 'runs'}" in script
     assert f"run {root / 'exp.yaml'} --seed 2" in script
 
 
@@ -305,3 +313,31 @@ def test_onestep_fb_rejects_extract_options():
 
     with pytest.raises(ValueError, match="takes no options"):
         run.adapter.extract_command(run, Path("ckpt"), Path("probes.npz"), Path("out"))
+
+
+def test_algorithm_output_is_unbuffered():
+    assert "PYTHONUNBUFFERED" in runner._process_env({})
+    assert runner._process_env({"PYTHONUNBUFFERED": "0"})["PYTHONUNBUFFERED"] == "0"  # an explicit setting wins
+
+
+def test_status_marks_vanished_cluster_jobs_lost(root, monkeypatch):
+    def record(name, **fields):
+        run_dir = root / "runs" / "toy" / "fake" / "online" / name
+        run_dir.mkdir(parents=True)
+        (run_dir / "run.json").write_text(json.dumps(fields))
+        return run_dir / "run.json"
+
+    gone = record("seed_0", status="running", lsf_job_id="11")
+    queued = record("seed_1", status="submitted", lsf_job_id="12")
+    killed = record("seed_2", status="running", lsf_job_id="13")
+    local = record("seed_3", status="running", lsf_job_id=None)
+    done = record("seed_4", status="completed", lsf_job_id="14", duration_s=7200)
+    monkeypatch.setattr(runner, "_lsf_states", lambda ids: {"12": "PEND", "13": "EXIT"})
+
+    rows = {row["run"].split("/")[-1]: row for row in runner.status(root)}
+
+    assert json.loads(gone.read_text())["status"] == "lost" and rows["seed_0"]["status"] == "lost"
+    assert json.loads(killed.read_text())["lsf_state"] == "EXIT"
+    assert json.loads(queued.read_text())["status"] == "submitted" and rows["seed_1"]["lsf_state"] == "PEND"
+    assert json.loads(local.read_text())["status"] == "running"  # no LSF job to check
+    assert rows["seed_4"]["status"] == "completed" and rows["seed_4"]["lsf_state"] is None

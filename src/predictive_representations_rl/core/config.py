@@ -12,6 +12,8 @@ class ExperimentConfig:
     env: str
     algo: str
     mode: str
+    # Optional name for a variant of the same env/algo/mode/task (e.g. "smoke", "lr3e-4"); gets its own run directory.
+    variant: str | None = None
     obs_type: str = "state"
     task: str | None = None
     dataset: str | None = None
@@ -42,6 +44,10 @@ def load_config(path: Path) -> ExperimentConfig:
     missing = {"env", "algo", "mode"} - set(raw)
     if missing:
         raise ValueError(f"{path}: missing required keys {sorted(missing)}")
+
+    variant = raw.get("variant")
+    if variant is not None and (not isinstance(variant, str) or not variant or "/" in variant or variant.startswith(".")):
+        raise ValueError(f"{path}: variant must be a plain name, got {variant!r}")
 
     if "seeds" in raw:
         raw["seeds"] = tuple(raw["seeds"])
