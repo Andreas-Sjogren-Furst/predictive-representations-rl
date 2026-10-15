@@ -31,7 +31,7 @@ from predictive_representations_rl.algorithms.base import AlgorithmAdapter
 from predictive_representations_rl.core import registry
 from predictive_representations_rl.core.compat import check
 from predictive_representations_rl.core.config import ExperimentConfig
-from predictive_representations_rl.envs.base import EnvSpec
+from predictive_representations_rl.envs.base import EnvSpec, task_definition_fingerprint
 from predictive_representations_rl.probes.probe_set import ProbeSet, build_from_exorl
 
 # Where runs go unless PRL_RUNS_DIR points elsewhere (e.g. scratch space).
@@ -339,7 +339,7 @@ def _initial_record(run: ResolvedRun, argv: list[str], env: dict[str, str], cwd:
         "config_file": str(run.config_path) if run.config_path else None,
         "config": asdict(run.config),
         "env": {"name": run.env.name, "suite": run.env.suite, "task": run.config.task, "obs_type": run.config.obs_type,
-                "native_name": run.native_env_name},
+                "native_name": run.native_env_name, "task_definition": task_definition_fingerprint(run.env, run.root)},
         "algorithm": {"name": spec.name, "mode": run.config.mode, "data_requirement": requirement,
                       "task_specific": spec.task_specific, "representations": list(spec.representations)},
         "data_source": data_source,

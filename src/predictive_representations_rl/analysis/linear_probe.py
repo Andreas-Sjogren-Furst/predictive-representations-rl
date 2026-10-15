@@ -1,68 +1,19 @@
-"""Linear probes: how well a linear readout of each representation recovers each ground-truth factor.
-
-Continuous factors: ridge regression, cross-validated R^2. Categorical factors (rooms, rewarded-or-not): class-balanced
-logistic regression, balanced accuracy, so chance is 1/k however imbalanced the classes are. Folds are split by
-episode when the probe set records it, because windows from the same episode overlap and would otherwise leak
-between train and test; categorical folds are also stratified by class.
-"""
+"""Files and figures for linear probes; the probing itself lives in rl_lab.analysis.probes."""
 
 from __future__ import annotations
 
 import csv
 import json
-import warnings
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from sklearn.exceptions import ConvergenceWarning
-from sklearn.linear_model import LogisticRegression, RidgeCV
-from sklearn.model_selection import GroupKFold, KFold, StratifiedGroupKFold, StratifiedKFold, cross_val_score
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
+from rl_lab.analysis.probes import probe, probe_table, skip_reason  # noqa: F401  (re-exported)
 
 from predictive_representations_rl.analysis import plotting
-from predictive_representations_rl.analysis.base import Analyzer, factor_columns
+from predictive_representations_rl.analysis.base import Analyzer
 
-NUM_FOLDS = 5
-# A class needs this many probes, from at least NUM_FOLDS episodes, to be probed; otherwise the factor is skipped.
-MIN_CLASS_SIZE = 20
-RIDGE_ALPHAS = np.logspace(-3, 3, 13)
 FIELDS = ["representation", "factor", "kind", "metric", "score", "score_std", "chance"]
-
-
-def skip_reason(target: np.ndarray, kind: str, groups: np.ndarray | None) -> str | None:
-    """Why a factor cannot be probed reliably, or None."""
-    if np.ptp(target) == 0:
-        return "constant"
-    if kind == "categorical":
-        for label in np.unique(target):
-            members = target == label
-            episodes = len(np.unique(groups[members])) if groups is not None else NUM_FOLDS
-            if members.sum() < MIN_CLASS_SIZE or episodes < NUM_FOLDS:
-                return f"class {label} has {members.sum()} probes from {episodes} episodes"
-    return None
-
-
-def probe(values: np.ndarray, target: np.ndarray, kind: str, groups: np.ndarray | None) -> dict[str, Any]:
-    grouped = groups is not None and len(np.unique(groups)) >= NUM_FOLDS
-
-    if kind == "categorical":
-        folds = StratifiedGroupKFold(NUM_FOLDS, shuffle=True, random_state=0) if grouped else StratifiedKFold(NUM_FOLDS, shuffle=True, random_state=0)
-        model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000, class_weight="balanced"))
-        metric = "balanced_accuracy"
-        chance = 1.0 / len(np.unique(target))
-    else:
-        folds = GroupKFold(NUM_FOLDS) if grouped else KFold(NUM_FOLDS, shuffle=True, random_state=0)
-        model = make_pipeline(StandardScaler(), RidgeCV(alphas=RIDGE_ALPHAS))
-        metric = "r2"
-        chance = 0.0
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", ConvergenceWarning)
-        scores = cross_val_score(model, values, target, cv=folds, groups=groups if grouped else None, scoring=metric)
-
-    return {"metric": metric, "score": float(scores.mean()), "score_std": float(scores.std()), "chance": chance}
 
 
 class LinearProbeAnalyzer(Analyzer):
@@ -70,20 +21,7 @@ class LinearProbeAnalyzer(Analyzer):
 
     def run(self, representations: dict[str, np.ndarray], metadata: dict[str, np.ndarray], output_dir: Path) -> dict[str, Any]:
         output_dir.mkdir(parents=True, exist_ok=True)
-        groups = metadata.get("episode")
-        factors, skipped = {}, {}
-        for name, (target, kind) in factor_columns(metadata).items():
-            reason = skip_reason(target, kind, groups)
-            if reason is None:
-                factors[name] = (target, kind)
-            else:
-                skipped[name] = reason
-
-        rows = []
-        for rep_name, values in representations.items():
-            for factor, (target, kind) in factors.items():
-                result = probe(values, target, kind, groups)
-                rows.append({"representation": rep_name, "factor": factor, "kind": kind, **result})
+        rows, skipped = probe_table(representations, metadata, metadata.get("episode"))
 
         write_rows(rows, output_dir / "linear_probe.csv")
         plot_scores(rows, output_dir / "linear_probe.png", "Linear probe: factor recovered from each representation")

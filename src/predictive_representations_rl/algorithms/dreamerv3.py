@@ -79,6 +79,57 @@ class DreamerV3Adapter(AlgorithmAdapter):
         checkpoint = run.native_dir / "checkpoint.ckpt"
         return checkpoint if checkpoint.exists() else None
 
+    def checkpoint_step(self, run: ResolvedRun, checkpoint: Path) -> tuple[int, str]:
+        # Dreamer's logged step counts environment steps (agent decisions × action repeat).
+        steps = [record["step"] for record in self._metrics(run)]
+        return (int(max(steps)) if steps else 0), "env_steps"
+
+    def view_protocol(self, run: ResolvedRun, view: str, info: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "input": "window_filter",
+            "window_length": info.get("window_length"),
+            "conditioning": {"type": "none"},
+            "stochastic": True,
+            "posterior": info.get("posterior"),
+            "sampling_noise": info.get("sampling_noise"),
+            "note": "RSSM posterior filtered over the probe window from the learned initial state; a_{t-1} feeds step t; "
+                    "value at the final step",
+        }
+
+    def budget(self, run: ResolvedRun) -> dict[str, int | None]:
+        agent_steps = int(run.config.budget.get("env_steps", DEFAULT_ENV_STEPS))  # run.steps counts agent decisions
+        repeat = self._action_repeat(run)
+        return {"agent_steps": agent_steps, "env_steps": agent_steps * repeat if repeat else None, "gradient_steps": None}
+
+    def native_metrics(self, run: ResolvedRun) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        training, evaluation = [], []
+        for record in self._metrics(run):
+            step = int(record["step"])
+            for key, value in record.items():
+                if key == "step" or not isinstance(value, (int, float)) or isinstance(value, bool):
+                    continue
+                if key == "eval_episode/score":
+                    evaluation.append({"training_step": step, "step_unit": "env_steps", "task": run.config.task,
+                                       "metric": "episode_return", "value": float(value)})
+                else:
+                    training.append({"training_step": step, "step_unit": "env_steps", "metric": key, "value": float(value)})
+        return training, evaluation
+
+    def _metrics(self, run: ResolvedRun) -> list[dict[str, Any]]:
+        import json
+
+        path = run.native_dir / "metrics.jsonl"
+        return [json.loads(line) for line in open(path)] if path.exists() else []
+
+    def _action_repeat(self, run: ResolvedRun) -> int | None:
+        import yaml
+
+        path = run.native_dir / "config.yaml"
+        if not path.exists():
+            return None
+        config = yaml.safe_load(path.read_text())
+        return config.get("env", {}).get(run.env.suite, {}).get("repeat")
+
     def experience(self, run: ResolvedRun) -> dict[str, Any]:
         return {
             "env_steps": int(run.config.budget.get("env_steps", DEFAULT_ENV_STEPS)),

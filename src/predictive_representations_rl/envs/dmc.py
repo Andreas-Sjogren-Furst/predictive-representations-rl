@@ -62,6 +62,11 @@ POINT_MASS_MAZE = EnvSpec(
     observation_types=frozenset({"state", "pixels"}),
     datasets={"exorl_rnd": exorl_rnd_dataset("point_mass_maze")},
     factors=point_mass_maze_factors,
+    # Both algorithms run onestep-fb's definitions (Dreamer via overrides/dreamerv3/custom_dmc_tasks).
+    task_definition=(
+        "third_party/onestep-fb/envs/custom_dmc_tasks/point_mass_maze.py",
+        "third_party/onestep-fb/envs/custom_dmc_tasks/point_mass_maze_*.xml",
+    ),
     probe_dataset="exorl_rnd",
     native_names={
         # FB pretrains on the domain's dataset and is evaluated zero-shot on every task.

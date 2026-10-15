@@ -57,6 +57,13 @@ class FakeAdapter(AlgorithmAdapter):
     def experience(self, run):
         return {"env_steps": run.config.budget.get("env_steps", 0)}
 
+    def checkpoint_step(self, run, checkpoint):
+        return 7, "gradient_steps"
+
+    def native_metrics(self, run):
+        evaluation = [{"training_step": 7, "step_unit": "gradient_steps", "task": "a", "metric": "episode_return", "value": 1.5}]
+        return [], evaluation
+
 
 @pytest.fixture
 def root(tmp_path, monkeypatch):
@@ -355,3 +362,40 @@ def test_dreamerv3_uses_onestep_fb_task_definitions():
     assert shim.exists()
     # The shim locates onestep-fb relative to itself (parents[5] is the project root).
     assert (shim.resolve().parents[5] / "third_party" / "onestep-fb" / "envs" / "custom_dmc_tasks" / "point_mass_maze.py").exists()
+
+
+def test_export_writes_a_valid_bundle(root, tmp_path):
+    from rl_lab.bundle.reader import load_manifest, load_view, validate_bundle
+
+    from predictive_representations_rl.export import export_run
+
+    rng = np.random.default_rng(0)
+    probe_set = ProbeSet(
+        observations=rng.normal(size=(40, 3, 2)).astype(np.float32),
+        actions=np.zeros((40, 3, 1), np.float32),
+        metadata={"source_index": np.arange(40) * 3, "episode": np.repeat(np.arange(8), 5), "step": np.arange(40) % 5,
+                  "x": rng.normal(size=40), "room": np.arange(40) % 2, "reward_a": np.zeros(40)},
+    )
+    run = runner.resolve(fake_config(), seed=0, root=root)
+    probes = runner.probe_set_path(root, run.env)
+    probe_set.save(probes)
+    probes.with_suffix(".json").write_text(json.dumps({"source": "/data/toy-val.hdf5", "num": 40, "length": 3, "seed": 0}))
+    runner.run_locally(run)
+    runner.extract(run)
+
+    bundle = export_run(run, catalog=tmp_path / "catalog")
+
+    report = validate_bundle(bundle, tmp_path / "catalog" / "datasets")
+    assert report.ok, report.errors
+    assert any("no untrained control" in warning for warning in report.warnings)
+    manifest = load_manifest(bundle)
+    assert manifest.experiment.id == "fake--toy--online--s0" and manifest.experiment.group == "fake/toy/online"
+    assert manifest.experiment.training.objective == "reward_free"
+    assert [(v.id, v.checkpoint_step) for v in manifest.views] == [("z", 7)]
+    sample_ids, embeddings = load_view(bundle, manifest, "z")
+    assert sample_ids[1] == "0000003"  # source index 3, zero-padded
+    np.testing.assert_allclose(embeddings, probe_set.final_observations * 2, rtol=1e-6)
+    assert {a.kind for a in manifest.artifacts} == {"evaluation_metrics", "provenance"}
+
+    # Re-exporting replaces the bundle; the dataset is reused because its content is unchanged.
+    assert export_run(run, catalog=tmp_path / "catalog") == bundle

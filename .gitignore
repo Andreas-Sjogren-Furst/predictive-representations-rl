@@ -13,3 +13,6 @@ wheels/
 # Experiment outputs
 runs/
 logs/
+
+# rl_lab catalog (exported bundles)
+catalog/

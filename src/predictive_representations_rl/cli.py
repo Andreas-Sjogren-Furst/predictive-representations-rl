@@ -189,6 +189,31 @@ def _analyze(paths: list[Path], seeds: list[int] | None, probe_name: str, analys
     return 1 if failed else 0
 
 
+def _export(paths: list[Path], seeds: list[int] | None, probe_name: str, catalog: Path | None) -> int:
+    from predictive_representations_rl.export import ExportError, catalog_dir, export_run
+
+    root = find_project_root()
+    catalog = catalog or catalog_dir(root)
+    failed = False
+    for path in paths:
+        try:
+            config = load_config(path)
+            runs = [resolve(config, seed, root, path.resolve(), allow_missing=True) for seed in (seeds or config.seeds)]
+        except (KeyError, ValueError, OSError, RunError) as error:
+            print(f"✗ {path}: {error}")
+            failed = True
+            continue
+        for run in runs:
+            try:
+                bundle = export_run(run, probe_name, catalog)
+            except (ExportError, NotImplementedError, OSError, ValueError) as error:
+                print(f"✗ {run.run_dir}: {error}")
+                failed = True
+                continue
+            print(f"✓ {bundle}")
+    return 1 if failed else 0
+
+
 def _status() -> int:
     rows = status(find_project_root())
     if not rows:
@@ -241,10 +266,18 @@ def main(argv: list[str] | None = None) -> int:
 
     commands.add_parser("status", help="List recorded runs; mark cluster runs whose job has vanished as lost.")
 
+    export_parser = commands.add_parser("export", help="Export extracted runs as rl_lab bundles into a catalog.")
+    export_parser.add_argument("configs", nargs="+", type=Path)
+    export_parser.add_argument("--seed", type=int, action="append", dest="seeds")
+    export_parser.add_argument("--probes", default="default", help="Probe set name.")
+    export_parser.add_argument("--catalog", type=Path, help="Catalog directory (default: $PRL_CATALOG or <project>/catalog).")
+
     args = parser.parse_args(argv)
 
     if args.command == "status":
         return _status()
+    if args.command == "export":
+        return _export(args.configs, args.seeds, args.probes, args.catalog)
 
     if args.command == "analyze":
         return _analyze(args.configs, args.seeds, args.probes, args.analysis)

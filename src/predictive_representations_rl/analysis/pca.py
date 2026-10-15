@@ -1,4 +1,4 @@
-"""PCA of each representation: how many directions carry its variance, and what the leading ones encode spatially."""
+"""PCA files and figures for each representation; the computation lives in rl_lab.analysis.pca."""
 
 from __future__ import annotations
 
@@ -8,27 +8,14 @@ from typing import Any
 
 import numpy as np
 
-from predictive_representations_rl.analysis.base import Analyzer
+from rl_lab.analysis.pca import participation_ratio, pca, pca_summary  # noqa: F401  (re-exported)
+
 from predictive_representations_rl.analysis import plotting
+from predictive_representations_rl.analysis.base import Analyzer
 
 NUM_SAVED_COMPONENTS = 10
 NUM_MAPPED_COMPONENTS = 3
 MAX_PLOTTED_COMPONENTS = 64
-
-
-def pca(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Scores [N, k] and explained-variance ratios [k] of centred values, via SVD."""
-    centred = values - values.mean(axis=0)
-    u, singular, _ = np.linalg.svd(centred, full_matrices=False)
-    variance = singular**2
-    total = variance.sum()
-    ratio = variance / total if total > 0 else np.zeros_like(variance)
-    return u * singular, ratio
-
-
-def participation_ratio(ratio: np.ndarray) -> float:
-    """Effective dimensionality (sum λ)^2 / sum λ^2: 1 if one direction dominates, D if variance is spread evenly."""
-    return float(ratio.sum() ** 2 / np.sum(ratio**2)) if ratio.any() else 0.0
 
 
 class PCAAnalyzer(Analyzer):
@@ -41,17 +28,9 @@ class PCAAnalyzer(Analyzer):
         summary: dict[str, Any] = {}
         ratios: dict[str, np.ndarray] = {}
         for name, values in representations.items():
-            scores, ratio = pca(values)
-            cumulative = np.cumsum(ratio)
+            summary[name], scores, ratio = pca_summary(values)
             ratios[name] = ratio
             np.savez(output_dir / f"{name}.npz", scores=scores[:, :NUM_SAVED_COMPONENTS], explained_variance_ratio=ratio)
-            summary[name] = {
-                "dims": int(values.shape[1]),
-                "components_for_90pct": int(np.searchsorted(cumulative, 0.90) + 1),
-                "components_for_95pct": int(np.searchsorted(cumulative, 0.95) + 1),
-                "participation_ratio": round(participation_ratio(ratio), 2),
-                "explained_variance_ratio_top10": [round(float(r), 4) for r in ratio[:NUM_SAVED_COMPONENTS]],
-            }
             if "x" in metadata and "y" in metadata:
                 self._spatial_map(name, scores, ratio, metadata["x"], metadata["y"], output_dir / f"map_{name}.png")
 

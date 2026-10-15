@@ -222,6 +222,7 @@ views:
   - id: "B"
     role: "trained"                       # trained | control
     checkpoint_step: 1_000_000
+    checkpoint_unit: "gradient_steps"     # gradient_steps | env_steps | agent_steps
     dataset: {id: "point_mass_maze-probes-default", hash: "sha256:…"}
     path: "representations/step_1000000/B.npz"
     protocol:                             # how the view was computed (§5.5)
@@ -233,13 +234,16 @@ views:
     role: "control"
     control_kind: "untrained"             # untrained | observation | random_projection
     control_of: "B"
-    checkpoint_step: 0
+    checkpoint_step: 0                    # untrained = the network at initialisation
+    checkpoint_unit: "gradient_steps"
     dataset: {id: "point_mass_maze-probes-default", hash: "sha256:…"}
     path: "representations/step_1000000/B__untrained.npz"
     protocol: {input: "final_state_and_action", window_length: 16, conditioning: {type: "none"}, stochastic: false}
-artifacts:
-  - {kind: "metrics", path: "metrics/training.parquet"}
-  - {kind: "metrics", path: "metrics/evaluation.parquet"}
+artifacts:                              # kinds: training_metrics | evaluation_metrics | task_latents | provenance
+  - {kind: "training_metrics", path: "metrics/training.parquet"}
+  - {kind: "evaluation_metrics", path: "metrics/evaluation.parquet"}
+  - {kind: "task_latents", path: "artifacts/latent.npz"}     # per-task arrays that are not per-sample views (FB z)
+  - {kind: "provenance", path: "provenance/run.json"}
 ```
 
 Unknown files are ignored; roles come only from the manifest. `schema_version` major mismatches are rejected with
@@ -258,7 +262,8 @@ construction: {method: "random_windows", num_samples: 4096, window_length: 16, s
 labels:
   x: {kind: continuous, unit: "m"}
   room: {kind: categorical, classes: 4}
-  rewarded_reach_top_left: {kind: binary, definition: "reward > 1e-6 under task_definition sha256:…"}
+  reward_reach_top_left: {kind: reward, task: reach_top_left, definition: "per-step reward under sha256:…"}
+  # kinds: continuous | categorical | reward (analyses derive e.g. "rewarded or not" from reward labels)
 grouping: {column: "episode_id"}          # used for leakage-safe splits
 coverage: {room_counts: {0: 1364, 1: 1967, 2: 499, 3: 266}}
 ```
@@ -310,8 +315,10 @@ Rollout samples form their own dataset (`rollout:<rollout_id>`); they can be pro
 ### Data conventions
 
 - Embeddings: `sample_ids` (1-D string array, unique) and `embeddings` (`(N, D)`, finite float32/64).
-- Training metrics: `training_step`, `metric`, `value`, optional `wall_time_s`. Evaluation metrics add `task`.
-  Training steps are never confused with rollout timesteps.
+- Training metrics (long format): `training_step`, `step_unit`, `metric`, `value`, optional `wall_time_s`.
+  Evaluation metrics add `task`. Training steps are never confused with rollout timesteps.
+- `inputs.npz` of a dataset: `sample_ids` plus the inputs views were computed from (e.g. `observations`, `actions`
+  at the sample, and `window_observations`/`window_actions` for history-dependent models).
 - Units of steps are explicit (`agent_steps`, `env_steps`, `gradient_steps`); Dreamer's action repeat makes these
   differ.
 
@@ -476,6 +483,16 @@ Another research group adds an algorithm by writing an exporter against `rl_lab.
 - `prl export`; task-definition fingerprint recorded by new runs (and computed for existing ones from the repo).
 - Streamlit Library, Experiment and Compare pages.
 - Synthetic fixture bundle for tests.
+
+**Status (2026-10-15):**
+- ✅ `rl_lab` workspace package; PCA, effective rank, linear probes and CKA moved into `rl_lab.analysis` (pure
+  functions; the harness wraps them). Re-running all analyses reproduced the previous outputs byte for byte.
+- ✅ Contracts (`rl_lab.contracts`), bundle writer/reader/validation (`rl_lab.bundle`), `rl-lab validate <catalog>`.
+- ✅ `prl export` (catalog at `$PRL_CATALOG`, default `<project>/catalog`); task-definition fingerprints recorded
+  in `run.json` for new runs and computed at export for older ones. All six point_mass_maze runs exported and
+  validated without warnings.
+- ⬜ Capability resolver and comparability report.
+- ⬜ Streamlit Library, Experiment and Compare pages.
 
 **Acceptance:** the six existing point_mass_maze runs are exported and browsable; the Compare page reproduces the
 probe, CKA and dimensionality tables in `RESULTS.md` (same numbers), with controls and the comparability report
