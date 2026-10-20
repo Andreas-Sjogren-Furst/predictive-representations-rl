@@ -1,343 +1,158 @@
-# Lightweight RL Experiment Harness
+# Implementation plan: flat zero-shot RL repository
+
+**Status:** plan v2, 2026-10-20. Replaces the earlier plans for an FB-vs-DreamerV3 harness and the rl_lab
+platform (both in git history, tagged `dreamer-comparison-2026-10` by step 0).
 
 ## Goal
 
-Build a **thin experimental harness** that makes it easy to run existing RL algorithms on selectable environments, collect their outputs in one standard format, and analyse their learned representations.
+The thesis studies **what forward-backward-style representations learn from the environment** in zero-shot
+reinforcement learning: agents pretrain without rewards on offline data, then infer a task from a few rewards and
+act zero-shot. The repository becomes one flat codebase organised around that workflow:
 
 ```text
-Environment ⟂ Algorithm ⟂ Analysis
+environment + offline dataset ──► agent pretraining (reward-free) ──► zero-shot evaluation per task
+                                              │
+                                              └──► representation analysis (probes, PCA, CKA)
 ```
 
-Principles:
+## Decisions
 
-- **Run algorithms as they are.** The harness does not replace or rewrite Dreamer, FB, or any other implementation, and does not force them into a common training mode. Each algorithm runs in its native mode (online, offline, ...) with its native replay buffer or dataset loader.
-- **Describe, don't constrain.** Each algorithm declares what it is (online/offline, data it needs, action/observation types, representations it exposes). The harness uses this to pick the right launch path and to reject incompatible env × algorithm combinations before a run starts.
-- **Record, don't enforce.** Experience and compute (transitions seen, gradient steps, data source) are recorded for every run so they can be compared afterwards; they are not forced to be equal at this stage.
-- **One small adapter per algorithm or environment.** Adding one must not require changes elsewhere.
-- **Analysis only reads standard artifacts**, never algorithm-specific log directories.
+| Topic | Decision |
+|---|---|
+| Agents | **FB, one-step FB, TD-JEPA** only. HILP, Laplacian, ICVF and BYOL-γ are not carried over. |
+| Third-party code | **All submodules removed.** The needed onestep-fb code moves into the repository (MIT licence and upstream commit kept in `agents/LICENSE`). Offline_vs_Online_in_MBRL (DreamerV3) is dropped entirely. |
+| Environments | An `environments/` package that supports several environment suites behind one interface (ExORL/DMC and OGBench to start). |
+| rl_lab | **Removed**: `packages/rl-lab`, `catalog/`, `implementation_lab.md`. |
+| Old contracts | **Removed**: the whole `src/predictive_representations_rl` package (`core/data.py`, `core/backend.py`, `AlgorithmSpec`/`EnvSpec`, compatibility checks, runtimes, adapters, extraction subprocess scripts, export). Pieces worth keeping are rewritten as plain modules. |
+| Python | One environment: Python 3.10 + JAX (CUDA 12), as onestep-fb uses. Everything runs in-process. |
+| Results | `RESULTS.md` kept; its Dreamer sections marked historical. Existing FB runs in `runs/` are kept as read-only legacy data. |
 
----
-
-## 1. Architecture: an orchestrator, not a shared process
-
-The algorithms cannot share a Python process with each other or with the harness:
-
-| Component | Python | Key dependencies | Runtime |
-|---|---|---|---|
-| Harness (`predictive_representations_rl`) | 3.12 | numpy (+ analysis libs) | `uv` project venv |
-| `third_party/onestep-fb` | 3.10 | JAX/Flax, gymnasium 0.29 | `third_party/onestep-fb/.venv` |
-| `third_party/Offline_vs_Online_in_MBRL` (DreamerV3) | 3.9 | JAX + TensorFlow, gym 0.19 | Singularity/Docker image or own venv |
-
-So the harness **orchestrates subprocesses**. Every run has three stages:
+## Target structure
 
 ```text
-            harness (py3.12)                         algorithm runtime (own venv/container)
-┌───────────────────────────────────┐        ┌──────────────────────────────────────────┐
-│ 1. resolve config + check compat  │──cmd──►│ train: the repo's own entry point         │
-│                                   │        │   (main.py / dreamerv3/train.py)          │
-│ 2. extract                        │──cmd──►│ extract: small script in harness/extract/ │
-│                                   │◄─.npz──│   loads checkpoint, encodes probe set     │
-│ 3. analyse (in-process)           │        └──────────────────────────────────────────┘
-└───────────────────────────────────┘
-```
-
-Extraction scripts live in this repo (not in the submodules) but are executed with the algorithm's interpreter, so they can import the algorithm's code. They exchange data with the harness only through `.npz`/`.json` files.
-
----
-
-## 2. Algorithm descriptors and adapters
-
-### Descriptor: what the algorithm is
-
-```python
-@dataclass(frozen=True)
-class AlgorithmSpec:
-    name: str                                          # "dreamerv3", "onestep_fb"
-    description: str
-    modes: Mapping[LearningMode, DataRequirement]      # {"online": "self_collected", "offline": "replay"}
-    action_spaces: frozenset[str]                      # {"continuous"} / {"discrete", "continuous"}
-    observation_types: frozenset[str]                  # {"state", "pixels"}
-    representations: tuple[str, ...]                  # names exposed by extraction
-    stateful_representation: bool                      # True if the representation depends on history (RNN)
-    task_specific: bool                                # True: trains on one task's reward; False: task-agnostic pretraining
-    runtime: Runtime                                   # Venv(path) | Container(image)
-```
-
-`DataRequirement` is what a mode needs before it starts: `self_collected` (interacts and fills its own replay), `dataset` (a fixed offline dataset from the env registry), or `replay` (another run's replay directory).
-
-Initial descriptors:
-
-| | `dreamerv3` | `onestep_fb` |
-|---|---|---|
-| modes → data | online → self_collected; offline (passive) → replay | offline → dataset (ExORL hdf5 / OGBench npz) |
-| training | single task | task-agnostic pretraining, zero-shot on every task |
-| actions | discrete, continuous | continuous only |
-| observations | state (`dmc_proprio`), pixels (`dmc_vision`) | state, pixels |
-| representations | `deter` (h), `stoch` (z), `model_state` (h,z) | `backward` B(s), `forward` F(s,a,z), `latent` z per task |
-| stateful | yes | no |
-
-### Adapter: how to run it
-
-```python
-class AlgorithmAdapter(ABC):
-    spec: AlgorithmSpec
-
-    @abstractmethod
-    def train_command(self, run: ResolvedRun) -> Command:
-        """argv + env vars that launch the repo's own training entry point."""
-
-    @abstractmethod
-    def find_checkpoint(self, run_dir: Path) -> Path:
-        """Locate the checkpoint the repo wrote."""
-
-    @abstractmethod
-    def extract_command(self, run: ResolvedRun, probe_set: Path, out_dir: Path) -> Command:
-        """Command that writes <representation>.npz for the probe set."""
-
-    def collect_metrics(self, run_dir: Path) -> Iterator[dict]:
-        """Translate the repo's native logs into standard metrics.jsonl rows."""
-```
-
-The adapter only builds command lines, maps names, and parses outputs. All learning happens in the original code.
-
-### Compatibility check
-
-Before launching, the runner checks `env.action_type ∈ algo.action_spaces`, `obs_type ∈ algo.observation_types`, `mode ∈ algo.learning_modes`, and that the required data source exists (e.g. the ExORL hdf5 file). Failures produce a clear message such as *"onestep_fb does not support discrete actions"* instead of a crash mid-run.
-
----
-
-## 3. Environment registry
-
-Environments are selected by name. Each entry describes the environment once and maps it to each algorithm's own naming:
-
-```python
-@dataclass(frozen=True)
-class EnvSpec:
-    name: str                              # "point_mass_maze"
-    suite: str                             # "dmc"
-    tasks: tuple[str, ...]                 # ("reach_top_left", ...)
-    action_type: str                       # "continuous"
-    observation_types: frozenset[str]      # {"state", "pixels"}
-    datasets: dict[str, DatasetSpec]       # {"exorl_rnd": DatasetSpec(...)}
-    algo_names: dict[str, Callable]        # algo -> (task, obs_type) -> native env/task string
-    factors: Callable | None               # ground-truth factors for analysis
-```
-
-Example native names for `point_mass_maze`, task `reach_top_left`:
-
-- one-step FB: `--env_name=exorl-rnd-point_mass_maze` (trains on all tasks, evaluates zero-shot on each)
-- DreamerV3: `--task dmc_point_mass_maze_reach_top_left --configs dmc_proprio`
-
-For controlled environments, `factors()` exposes interpretable state variables (for point_mass_maze: `x`, `y`, `vx`, `vy`, distance to each goal corner).
-
----
-
-## 4. Data sources and replay buffers
-
-- **Algorithms keep their own replay buffers.** Dreamer's online run fills its own replay directory; FB loads its own dataset. The harness does not reimplement replay.
-- The harness manages **offline data sources** only: where a dataset lives, whether it exists, how to obtain it (download/generate commands), and its size.
-- Where data must move between algorithms (e.g. Dreamer replay → FB dataset, or ExORL → Dreamer passive replay) the existing canonical types in `core/data.py` (`Trajectory`, `RepresentationDataset`, `TaskDataset`) are the intermediate format, with one converter per algorithm format (`backends/fb.py::representation_dataset_to_fb` is the first). Not needed for milestone 1.
-
----
-
-## 5. Experiment configs and CLI
-
-One small YAML file per experiment; anything under `overrides` is passed through to the algorithm unchanged.
-
-```yaml
-# configs/point_mass_maze/onestep_fb.yaml
-env: point_mass_maze
-algo: onestep_fb
-mode: offline
-dataset: exorl_rnd
-obs_type: state
-seeds: [0]
-budget: {train_steps: 1_000_000}
-overrides:
-  agent.latent_dim: 50
-  agent.discount: 0.98
-```
-
-```bash
-uv run prl check  configs/point_mass_maze/onestep_fb.yaml            # compatibility + data check only
-uv run prl run    configs/point_mass_maze/onestep_fb.yaml --seed 0   # train → extract → metrics
-uv run prl sweep  configs/point_mass_maze/*.yaml --seeds 0-2         # many runs
-uv run prl run    ... --submit lsf                                   # submit to the cluster instead of running locally
-uv run prl analyze runs/point_mass_maze --analysis pca,linear_probe
-uv run prl list   envs|algos|runs
-```
-
----
-
-Configs can build on each other: `extends: <path relative to this file>` starts from another config; the option blocks (`budget`, `overrides`, `environment`, `extract`, `resources`) are merged key by key and everything else is replaced. Sweeps are a folder of small variant configs, e.g. `configs/point_mass_maze/onestep_fb_alpha/alpha0.3.yaml` = the base FB config with `variant: alpha0.3` and `agent.alpha: 0.3`.
-
-## 6. Standard run directory
-
-```text
-runs/                                   # or $PRL_RUNS_DIR (e.g. scratch space)
-└── <environment>/
-    └── <algorithm>/
-        └── <mode>/[<task>/][<variant>/]seed_<N>/   # <task> only for single-task algorithms (Dreamer);
-                                                  # <variant> from the config's optional `variant` key
-            ├── run.json            # resolved config + provenance (below)
-            ├── train.log           # stdout/stderr of the algorithm process
-            ├── job.lsf             # when submitted with --submit lsf
-            ├── native/             # the repo's own logs/checkpoints, untouched
-            ├── metrics.jsonl       # standardized metrics (train + eval)        [not yet]
-            ├── probes/<probe set>/
-            │   ├── <representation>.npz   # key `values`, [N, D] (FB `latent` is [tasks, D])
-            │   ├── metadata.npz           # copy of the probe set's per-probe factors
-            │   ├── extract_info.json
-            │   └── extract.log
-            └── analysis/                                                        [not yet]
-```
-
-A run directory is never reused: `--force` moves an existing run aside to `seed_<N>.replaced-<time>` (algorithms such as Dreamer would otherwise silently resume from the old checkpoint).
-
-`run.json` records: status/exit code/duration, algorithm, mode, data requirement, env, task, obs type, data source (dataset files or replay dir), **experience** as configured (env steps, dataset, gradient steps), seed, the exact command line and environment, runtime, host, LSF job id, the checkpoint found after training, and the git commit (+dirty flag) of the harness and of each submodule. This is what makes later fairness comparisons possible without enforcing them now.
-
----
-
-## 7. Probe sets and representation extraction
-
-Representation analysis uses a fixed set of inputs so all algorithms are compared on exactly the same states.
-
-```python
-@dataclass(frozen=True)
-class ProbeSet:
-    observations: np.ndarray          # [N, T, obs_dim]  short sequences ending at the probe state
-    actions: np.ndarray               # [N, T, act_dim]  actions along those sequences
-    metadata: dict[str, np.ndarray]   # factors at the final state: x, y, goal distances, ...
-```
-
-- **Stateless representations** (FB `B(s)`, `F(s,a,z)`) use only the final state of each sequence.
-- **Stateful representations** (Dreamer `h`, `z`) are computed by running the RSSM posterior over the whole sequence; the value at the final step is the representation. A single observation would give a meaningless `h`, so probes are sequences (default `T = 16`) cut from held-out trajectories.
-- Probe sets are generated once per environment by the harness and saved under `probes/<env>/<name>.npz`, then passed to every algorithm's extraction script.
-
----
-
-## 8. Analysis
-
-Analysers receive only arrays and metadata:
-
-```python
-class Analyzer(ABC):
-    name: str
-
-    @abstractmethod
-    def run(self, representations: dict[str, np.ndarray], metadata: dict[str, np.ndarray], output_dir: Path) -> dict:
-        ...
-```
-
-Initial: PCA, linear probes (predict factors from representation). Later: UMAP, latent-dimension heatmaps, pairwise latent-distance vs. true distance, CKA between checkpoints/algorithms, Procrustes/RSA.
-
-Avoid comparing individual latent coordinates directly; representations may be rotated or permuted while carrying the same information.
-
----
-
-## 9. Package layout
-
-Builds on the existing package rather than replacing it:
-
-```text
-src/predictive_representations_rl/
-├── core/
-│   ├── data.py            # existing: Trajectory, RepresentationDataset, TaskDataset
-│   ├── evaluation.py      # existing: evaluate()
-│   ├── backend.py         # existing in-process interface; superseded by algorithms/base.py
-│   ├── config.py          # YAML → ResolvedRun
-│   ├── runtime.py         # Venv / Container, subprocess launching
-│   └── registry.py        # env + algorithm registries
-├── envs/
-│   ├── base.py            # EnvSpec, DatasetSpec
-│   └── dmc.py             # point_mass_maze (+ walker, cheetah, ... later)
-├── algorithms/
-│   ├── base.py            # AlgorithmSpec, AlgorithmAdapter
+predictive-representations-rl/
+├── agents/                     # zero-shot RL agents
+│   ├── __init__.py             # AGENTS = {"fb": ..., "onestep_fb": ..., "td_jepa": ...}; default configs
+│   ├── fb.py
 │   ├── onestep_fb.py
-│   └── dreamerv3.py
-├── backends/
-│   └── fb.py              # existing: canonical data → FB format
-├── extract/               # run inside each algorithm's runtime
-│   ├── onestep_fb_extract.py
-│   └── dreamerv3_extract.py
-├── probes/
-│   └── probe_set.py
+│   ├── td_jepa.py
+│   ├── networks.py             # MLPs, value/actor heads, ensembles (from onestep-fb utils/networks.py)
+│   ├── encoders.py             # pixel encoders (from utils/encoders.py)
+│   ├── flax_utils.py           # TrainState, ModuleDict, save/restore (from utils/flax_utils.py)
+│   └── LICENSE                 # onestep-fb MIT licence + upstream commit
+├── environments/               # environment suites behind one interface
+│   ├── __init__.py             # make_env(name, task), load_datasets(name), list_tasks(name), task_reward(...)
+│   ├── registry.py             # per environment: suite, tasks, dataset files, task-definition files, factors
+│   ├── datasets.py             # Dataset / GCDataset sampling, relabelling with task rewards
+│   ├── exorl/                  # DMC-based ExORL domains
+│   │   ├── env.py              # DMC → gymnasium wrapper, make_env
+│   │   ├── data.py             # load ExORL hdf5, relabel rewards
+│   │   ├── generate.py         # download + build datasets (from data_gen_scripts/)
+│   │   └── tasks/              # custom_dmc_tasks (point_mass_maze, walker, ...)
+│   ├── ogbench/                # OGBench (AntMaze, cube, scene, ...)
+│   │   ├── env.py
+│   │   └── data.py
+│   └── factors.py              # ground-truth state factors for analysis (point_mass_maze; AntMaze later)
+├── training/
+│   ├── pretrain.py             # reward-free pretraining loop (from onestep-fb main.py)
+│   ├── zero_shot.py            # task inference (z from rewards) + evaluation per task
+│   ├── run.py                  # one experiment: config → run directory (run.json, logs, checkpoints)
+│   └── logging.py              # CSV/W&B logging (from utils/log_utils.py)
 ├── analysis/
-│   ├── pca.py
-│   └── linear_probe.py
-├── runner.py              # check → train → extract → metrics
-└── cli.py                 # `prl` entry point
-configs/                   # experiment YAML files
-runs/                      # outputs (git-ignored)
+│   ├── probe_sets.py           # fixed probe states from held-out data, with factors
+│   ├── representations.py      # named views per agent (FB: backward, forward, q_values, latent; TD-JEPA: its encoders), untrained controls
+│   ├── linear_probes.py, pca.py, cka.py
+│   └── plots.py
+├── configs/<environment>/<agent>.yaml   # sweeps as small files using `extends`
+├── scripts/
+│   ├── submit_lsf.py           # submit a config/seed to the DTU cluster (exclusive GPU, shared mode)
+│   ├── status.py               # list runs and their LSF state
+│   └── generate_datasets.sh
+├── tests/
+├── runs/                       # outputs (git-ignored)
+├── main.py                     # CLI: train | evaluate | extract | analyze | submit | status
+├── RESULTS.md  IMPLEMENTATION_PLAN.md  README.md
+└── pyproject.toml              # Python 3.10, one project
 ```
 
----
+### Where things come from
 
-## 10. Milestone 1: point_mass_maze, both algorithms, end to end
+| New location | From |
+|---|---|
+| `agents/fb.py`, `onestep_fb.py`, `td_jepa.py` | `third_party/onestep-fb/agents/` |
+| `agents/networks.py`, `encoders.py`, `flax_utils.py` | `third_party/onestep-fb/utils/` |
+| `environments/exorl/`, `ogbench/`, `datasets.py` | `third_party/onestep-fb/envs/`, `utils/{env_utils,datasets}.py`, `data_gen_scripts/` |
+| `environments/registry.py`, `factors.py` | `src/.../envs/` (rewritten without the EnvSpec contract) |
+| `training/pretrain.py`, `zero_shot.py`, `logging.py` | `third_party/onestep-fb/main.py`, `utils/{evaluation,log_utils}.py` |
+| `training/run.py`, `scripts/submit_lsf.py`, `status.py` | `src/.../runner.py` (run.json, LSF, status), simplified |
+| `analysis/` | `src/.../probes/`, `src/.../extract/onestep_fb_extract.py`, `packages/rl-lab/src/rl_lab/analysis/`, `src/.../analysis/plotting.py` |
+| config `variant` / `extends` | `src/.../core/config.py` |
 
-`point_mass_maze` is a 2D point mass in a maze with four goal corners (`reach_top_left`, `reach_top_right`, `reach_bottom_left`, `reach_bottom_right`). Both repos ship the same ExORL `custom_dmc_tasks` implementation, actions are continuous, and the (x, y) position gives a direct ground truth for the representation analysis.
+## Removed
 
-### 10.1 Make each algorithm runnable on point_mass_maze by hand
+- Submodules `third_party/onestep-fb` (after vendoring, step 3) and `third_party/Offline_vs_Online_in_MBRL`;
+  `.gitmodules`; `third_party/onestep-fb/.venv`.
+- DreamerV3: `.venvs/dreamerv3` (12 GB), `runs/point_mass_maze/dreamerv3/` (1.4 GB), Dreamer configs and scripts.
+- Agents HILP, Laplacian, ICVF, BYOL-γ.
+- `src/predictive_representations_rl/` (old contracts and harness), `packages/rl-lab/`, `catalog/`,
+  `implementation_lab.md`, `scripts/smoke_test_fb_dataset.py`, the old tests.
 
-**One-step FB (offline, ExORL RND data).** Two bugs in the fork's *environment/dataset plumbing* (not the algorithm) currently break this domain:
+## Steps
 
-1. `envs/exorl_utils.py::make_env_and_datasets`: for a domain-only name, the default task is `'walk'` (or `'reach_bottom_left'` for jaco); `'walk'` is not a point_mass_maze task, so the `ALL_TASKS` assertion fails. Fix: keep `'walk'` where the domain has it, otherwise default to `ALL_TASKS[domain_name][0]` (unchanged for walker/cheetah/quadruped/jaco).
-2. `data_gen_scripts/exorl_dataset_aggregator.py::_worker_fn`: task keys are derived with `'_'.join(task.split('_')[1:])`, which turns `point_mass_maze_reach_top_left` into `mass_maze_reach_top_left`. The rewards are then stored as `rewards_mass_maze_...`, but `relabel_dataset` looks up `rewards_reach_top_left`. Fix: pass bare task names to the workers and build the env name from the known domain.
+Each step ends tested and committed.
 
-Status: both fixed in the submodule working tree and verified on a small synthetic point_mass_maze buffer (aggregate → hdf5 → `make_env_and_datasets` → `relabel_dataset` for all four tasks). Still to do: commit in the fork (`Andreas-Sjogren-Furst/onestep-fb`), push, and bump the submodule. Then:
+**0. Safety.** Tag the current commit `dreamer-comparison-2026-10`. Note the existing FB runs to keep.
 
-```bash
-sh data_gen_scripts/exorl_download.sh point_mass_maze rnd
-python data_gen_scripts/generate_exorl_dataset.py --domain_name=point_mass_maze --save_path=~/.exorl/data/rnd-point_mass_maze.hdf5
-python data_gen_scripts/generate_exorl_dataset.py --domain_name=point_mass_maze --save_path=~/.exorl/data/rnd-point_mass_maze-val.hdf5 --skip_size=5_000_000 --dataset_size=100_000
-python main.py --env_name=exorl-rnd-point_mass_maze --agent=agents/onestep_fb.py --train_steps=<small> ...
-```
+**1. Remove DreamerV3 and rl_lab.** Delete the Dreamer submodule, venv, runs, configs and scripts; delete
+`packages/rl-lab`, `catalog/`, `implementation_lab.md`. Mark the Dreamer sections of `RESULTS.md` historical.
+Frees ~13.5 GB.
 
-**DreamerV3 (online, proprio).** `dmc_point_mass_maze_reach_bottom_right` is already in the repo's DMC task list and `embodied/envs/dmc.py` routes maze tasks to `custom_dmc_tasks`. Open item: set up a runtime on the HPC (Singularity image from the repo, or a Python 3.9 venv following the Dockerfile) and confirm a short run with `--configs dmc_proprio --task dmc_point_mass_maze_reach_top_left`.
+**2. New skeleton and environment.** Create the flat directories and a Python 3.10 `pyproject.toml` with the
+onestep-fb dependencies (JAX CUDA 12, Flax, Optax, dm_control, gymnasium, OGBench, h5py) plus analysis
+dependencies (scikit-learn, matplotlib, PyYAML).
+*Check:* `uv sync`; JAX uses the GPU on a GPU node and the CPU on the login node.
 
-### 10.2 Harness
+**3. Move the agent, environment and training code in, while the submodule still exists.** FB, one-step FB,
+TD-JEPA and their shared modules; ExORL and OGBench environments; the pretraining and zero-shot loop. Rewrite
+imports for the new layout.
+*Check (equivalence):* on CPU with the same seed and config, a 2,000-step run of `training/pretrain.py` and of the
+submodule's `main.py` give identical `train.csv`/`eval.csv` and identical checkpoint parameters, for one-step FB
+on point_mass_maze. Then remove the onestep-fb submodule.
 
-1. ✅ `AlgorithmSpec`, `EnvSpec`, registries, YAML configs, compatibility check (`prl check`, `prl list`).
-2. ✅ `Runtime` (venv, container) and `runner.py`: `prl run <config> [--seed N] [--dry-run] [--submit lsf] [--force]` launches training and writes `run.json`, `train.log`, `native/`.
-3. ✅ Adapters: `onestep_fb` and `dreamerv3` online (train command, checkpoint location, configured experience). Still to do: metrics translation to `metrics.jsonl`; Dreamer offline (passive) mode.
-4. ✅ Probe sets: `prl probes <env>` cuts 4096 windows of 16 steps from the held-out RND val split into `runs/<env>/probes/default.npz` (metadata: x, y, vx, vy, speed, room/quadrant, distance to each goal, per-task reward, episode/step).
-5. ✅ Extraction: `prl extract <config> [--cpu]` runs `extract/<algo>_extract.py` inside the algorithm's runtime on the latest checkpoint and records it under `extractions` in `run.json`.
-   - one-step FB: `backward` B(s,a), `forward` F(s,a) (ensemble mean), `latent` z per task (inferred exactly as main.py does), `q_values` F·z per task. B and F take the dataset action at the probe state (clipped as in training).
-   - DreamerV3: `deter` (h), `stoch` (z, flattened one-hot), `model_state` (h,z) at the final step of the posterior filtered over the window (prev action a_{t-1}, learned initial state at t=0). Matches the repo's own `forward_obs_pass` within sampling noise. State encoders only. Option `extract: {posterior: sample|mode}` (see known issues).
-6. ✅ Analysis: `prl analyze <configs...> [--analysis pca,linear_probe]` writes `analysis/<probe set>/<analyser>/` per run, and with several runs a combined `runs/<env>/analysis/<probe set>/linear_probe_comparison.{csv,png}`. The raw probe observation is always included as a baseline representation.
-   - PCA: explained variance (components for 90/95%, participation ratio), and maps of PC1-3 over (x, y).
-   - Linear probes: ridge R² for continuous factors; class-balanced logistic regression scored by balanced accuracy (chance 1/k) for categorical ones (room, and `rewarded_<task>` = reward > 1e-6, since rewards are mostly 0). 5-fold CV split by episode (stratified for classes), since overlapping windows from one episode would leak. Classes with < 20 probes or from < 5 episodes are skipped and listed in the summary.
-   - CKA (cross-run): `prl analyze <configs...> --analysis cka` writes `runs/<env>/analysis/<probe set>/cka.{csv,png}`, the linear CKA between every representation of every given run plus the observation baseline, on the shared probe set. Invariant to rotation and isotropic scaling, so FB and Dreamer representations of different widths are comparable; refuses runs extracted on a different version of the probe set. Linear CKA is biased upwards for wide representations, so read it against the `_untrained` rows.
-   - Untrained control: both extraction scripts also write every representation from the network at initialisation (same architecture, config and seed) as `<name>_untrained`, so it appears next to the trained one in every analysis.
+**4. Run management.** `training/run.py` (config → run directory with `run.json`: status, commit, config,
+task-definition fingerprint, timing), `main.py` CLI, `scripts/submit_lsf.py` (exclusive GPU in shared mode, runs
+directory passed explicitly), `scripts/status.py` (marks vanished jobs lost), configs with `variant`/`extends`.
+*Check:* a short CPU run end to end; dry-run LSF script generation.
 
-**Done when:** `prl run` works for both configs on point_mass_maze, each run directory contains `run.json`, `metrics.jsonl` and probe representations, and `prl analyze` produces PCA plots and linear-probe scores for FB `B`/`F` and Dreamer `h`/`z` on the same probe set.
+**5. Analysis.** Probe sets, representation extraction for the three agents (with untrained controls), linear
+probes, PCA, CKA and plots as plain modules. Remove `src/predictive_representations_rl/`.
+*Check:* re-analysing the existing FB runs' extracted representations reproduces the numbers in `RESULTS.md`
+exactly; TD-JEPA extraction runs on a short CPU checkpoint.
 
----
+**6. Environments beyond point_mass_maze.** Registry entries for the other ExORL domains and OGBench AntMaze;
+AntMaze factors (x, y, maze cell, distance to goals) and probe set.
+*Check:* probe sets build for point_mass_maze and AntMaze; factors unit-tested.
 
-## 11. Known issues / open questions
+**7. Baselines.** One-step FB on AntMaze large-navigate with the README settings reaches the published zero-shot
+range (validates the moved code); FB, one-step FB and TD-JEPA on point_mass_maze with the new structure.
+*Check:* results added to `RESULTS.md`.
 
-- **Dreamer runtime**: Python 3.9 venv at `.venvs/dreamerv3`, built by `scripts/setup_dreamerv3_venv.sh` (DMC-only subset of the repo's Dockerfile; JAX 0.4.30, TF 2.16). Verified on CPU up to training + checkpoint; a full run still needs a GPU node.
-- **Task definitions differ between the repos**: both ship ExORL's `custom_dmc_tasks` with identical maze/dynamics XMLs, but Offline_vs_Online_in_MBRL's `point_mass_maze` rewards `1 - distance` everywhere (a random policy scores ~840/1000 on reach_top_left) while onestep-fb's rewards only within ~3 cm of the goal. The dreamerv3 adapter puts `overrides/dreamerv3/custom_dmc_tasks` (a shim re-exporting onestep-fb's package) first on PYTHONPATH, so Dreamer trains on exactly the tasks FB's data, zero-shot evaluation and probe rewards use. Neither repo is changed. Start positions in onestep-fb's version come from NumPy's global RNG (spawned env workers: distinct per worker, not reproducible across runs).
-- **Cluster runs (lessons from the first Dreamer GPU run, which hung for 48 h after start-up)**:
-  - GPUs are requested with `mode=shared:j_exclusive=yes` (`j_exclusive=no`, the default for shared mode, let LSF stack several jobs on one GPU and the later ones failed to initialise CUDA). `mode=shared` because Dreamer's environment workers are separate processes that render through EGL on the GPU, and `exclusive_process` lets only the first process use it. Rendering cannot be switched off for state-only Dreamer runs without changing the repo (`env.dmc.render` is not a config key).
-  - Algorithm processes run with `PYTHONUNBUFFERED=1`, so `train.log` shows progress even when a job is killed.
-  - `prl status` lists every run with its LSF state and marks in-flight runs whose job vanished or ended without finalising `run.json` as `lost`.
-  - `PRL_RUNS_DIR` is exported into job scripts (DTU's LSF does not forward the environment).
-  - Before a long run, a short `variant: smoke` config on a less busy queue (see `configs/point_mass_maze/dreamerv3_smoke.yaml`).
-- **No GPU on login nodes**: both JAX installs probe CUDA at start-up; for CPU runs set `environment: {JAX_PLATFORMS: cpu}` in the config.
-- **FB is continuous-action only.** Discrete environments (e.g. a gridworld Four Rooms) need either a continuous variant or an FB change; deferred.
-- **Dreamer offline (passive) mode is not purely offline**: it steps a training env to pace updates and prefills its eval replay with a random policy. Fine for "run as is"; must be accounted for (and recorded in `run.json`) when comparing experience later.
-- **Different experience by default**: FB trains on ~5M RND transitions; Dreamer online collects its own. Recorded, not equalized, in milestone 1.
-- **Dreamer representations are stochastic by default**: z is sampled from the posterior and h depends on those samples, which also lowers Dreamer's CKA with everything. `extract: {posterior: mode}` in the config makes extraction deterministic (z = one-hot argmax of the posterior logits, fed forward); with the default `sample`, `extract_info.json` / `run.json` report `sampling_noise` (run-to-run difference relative to the spread across probes; debug model: h 0.51, z 0.86). Decide on the trained checkpoint which to use for the comparison.
-- **Dreamer action alignment in extraction** is consistent with the repo's own pass but could not be discriminated on the debug model (it barely uses actions); re-check on a trained checkpoint.
-- **Linear decodability of the state is not evidence of learning**: the untrained FB networks recover position as well as trained ones (R² ≈ 0.99 on the smoke run). Compare every representation with its `_untrained` control, and lean on analyses that test structure beyond the state (goal distances, rewards, PCA geometry, later CKA/RSA).
-- `core/backend.py` (in-process `PredictiveRLBackend`) does not fit the subprocess design; keep until the adapters replace it, then remove.
+**8. Documentation.** README: structure, install, quick start (generate data → train → evaluate → extract →
+analyze), cluster usage.
 
-## 12. Later
+## Risks
 
-- More environments (walker, cheetah, quadruped, jaco; OGBench), and a continuous Four Rooms.
-- More analysers (UMAP, CKA, RSA, distance analysis).
-- Experience-matched comparisons (shared datasets via the canonical data format).
-- Cluster sweeps with result aggregation.
+| Risk | Handling |
+|---|---|
+| Moved code silently differs from onestep-fb | Step 3 equivalence check on CPU before the submodule goes; upstream commit recorded |
+| Shared modules pull in code of removed agents | Only modules used by FB, one-step FB and TD-JEPA are moved; unused code paths deleted; tests cover all three agents |
+| Generic top-level package names (`agents`, `environments`, `training`, `analysis`) | Imported only within this project; renamed if a clash appears |
+| GPU non-determinism | Bitwise checks only on CPU (step 3) and for analysis (step 5) |
+| Losing earlier work | Everything recoverable from the tag; findings kept in `RESULTS.md` |
 
-The framework should stay **thin**. If an abstraction requires large changes to the original RL algorithms, it is probably too low-level.
+## Open questions (do not block the restructure)
+
+1. FB settings for point_mass_maze (the walker settings give no working zero-shot policy): sweep reward
+   temperature and discount after the AntMaze reproduction.
+2. Seeds per configuration for thesis results (suggested: 3).
+3. Whether the existing legacy runs need to be readable by the new analysis code, or only their recorded results.
