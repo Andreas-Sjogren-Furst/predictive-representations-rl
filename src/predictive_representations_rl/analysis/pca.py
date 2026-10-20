@@ -1,4 +1,4 @@
-"""PCA files and figures for each representation; the computation lives in rl_lab.analysis.pca."""
+"""PCA files and figures for each representation; the computation lives in analysis.spectrum."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from rl_lab.analysis.pca import participation_ratio, pca, pca_summary  # noqa: F401  (re-exported)
+from predictive_representations_rl.analysis.spectrum import participation_ratio, pca, pca_summary  # noqa: F401  (re-exported)
 
 from predictive_representations_rl.analysis import plotting
 from predictive_representations_rl.analysis.base import Analyzer

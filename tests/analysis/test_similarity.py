@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from rl_lab.analysis.cka import cka_matrix, linear_cka
+from predictive_representations_rl.analysis.similarity import cka_matrix, linear_cka
 
 RNG = np.random.default_rng(0)
 

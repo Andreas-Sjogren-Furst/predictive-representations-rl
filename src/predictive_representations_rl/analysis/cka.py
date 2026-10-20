@@ -1,4 +1,4 @@
-"""Files and figures for the linear CKA comparison; the computation lives in rl_lab.analysis.cka."""
+"""Files and figures for the linear CKA comparison; the computation lives in analysis.similarity."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import csv
 from pathlib import Path
 
 import numpy as np
-from rl_lab.analysis.cka import cka_matrix, linear_cka  # noqa: F401  (re-exported)
+
+from predictive_representations_rl.analysis.similarity import cka_matrix, linear_cka  # noqa: F401  (re-exported)
 
 from predictive_representations_rl.analysis import plotting
 

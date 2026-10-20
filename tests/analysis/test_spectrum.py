@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from rl_lab.analysis.pca import participation_ratio, pca, pca_summary
+from predictive_representations_rl.analysis.spectrum import participation_ratio, pca, pca_summary
 
 RNG = np.random.default_rng(0)
 

@@ -391,7 +391,7 @@ def _lsf_script(run: ResolvedRun) -> str:
         f"#BSUB -e {run.run_dir}/lsf_%J.out",
     ]
     if resources["gpus"]:
-        # mode=shared lets several processes of this job use the GPU (Dreamer's environment workers render through
+        # mode=shared lets several processes of this job use the GPU (e.g. environment workers rendering through
         # EGL; exclusive_process lets only the first one in and the rest hang). j_exclusive=yes keeps the GPU to this
         # job: without it LSF puts other jobs on the same GPU, and JAX's 75% memory preallocation then fails.
         lines.append(f'#BSUB -gpu "num={resources["gpus"]}:mode=shared:j_exclusive=yes"')

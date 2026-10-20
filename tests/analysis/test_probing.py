@@ -1,6 +1,6 @@
 import numpy as np
 
-from rl_lab.analysis.probes import factor_columns, probe, probe_table, skip_reason
+from predictive_representations_rl.analysis.probing import factor_columns, probe, probe_table, skip_reason
 
 RNG = np.random.default_rng(0)
 

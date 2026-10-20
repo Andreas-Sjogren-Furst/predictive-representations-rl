@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from predictive_representations_rl.algorithms.base import AlgorithmAdapter, AlgorithmSpec
-from predictive_representations_rl.algorithms.dreamerv3 import DreamerV3Adapter
 from predictive_representations_rl.algorithms.onestep_fb import OneStepFBAdapter
 from predictive_representations_rl.envs.base import EnvSpec
 from predictive_representations_rl.envs.dmc import POINT_MASS_MAZE
 
 # To add an environment or algorithm: define it in envs/ or algorithms/ and list it here.
 ENVS: dict[str, EnvSpec] = {spec.name: spec for spec in (POINT_MASS_MAZE,)}
-ADAPTERS: dict[str, AlgorithmAdapter] = {adapter.spec.name: adapter for adapter in (OneStepFBAdapter(), DreamerV3Adapter())}
+ADAPTERS: dict[str, AlgorithmAdapter] = {adapter.spec.name: adapter for adapter in (OneStepFBAdapter(),)}
 ALGORITHMS: dict[str, AlgorithmSpec] = {name: adapter.spec for name, adapter in ADAPTERS.items()}
 
 

@@ -101,6 +101,9 @@ predictive-representations-rl/
 
 Each step ends tested and committed.
 
+**Progress:** ✅ 0 (tag `dreamer-comparison-2026-10`) · ✅ 1 (DreamerV3 and rl_lab removed; rl_lab's analysis
+functions are back in the old harness as `analysis/{spectrum,probing,similarity}.py` until step 5)
+
 **0. Safety.** Tag the current commit `dreamer-comparison-2026-10`. Note the existing FB runs to keep.
 
 **1. Remove DreamerV3 and rl_lab.** Delete the Dreamer submodule, venv, runs, configs and scripts; delete

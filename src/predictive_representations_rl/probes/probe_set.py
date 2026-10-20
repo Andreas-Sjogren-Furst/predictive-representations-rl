@@ -1,7 +1,7 @@
 """Fixed probe inputs that every algorithm's representation is evaluated on.
 
 A probe is a short trajectory window ending at the probe state. Stateless representations (FB) use only the
-final step; history-dependent ones (Dreamer's RSSM) are filtered over the whole window.
+final step; history-dependent ones (recurrent models) are filtered over the whole window.
 """
 
 from __future__ import annotations

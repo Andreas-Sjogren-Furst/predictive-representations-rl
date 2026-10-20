@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from rl_lab.analysis.probes import factor_columns  # noqa: F401  (re-exported; lives in rl_lab)
+from predictive_representations_rl.analysis.probing import factor_columns  # noqa: F401  (re-exported)
 
 
 class Analyzer(ABC):

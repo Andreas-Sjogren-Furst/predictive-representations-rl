@@ -1,4 +1,4 @@
-"""Files and figures for linear probes; the probing itself lives in rl_lab.analysis.probes."""
+"""Files and figures for linear probes; the probing itself lives in analysis.probing."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from rl_lab.analysis.probes import probe, probe_table, skip_reason  # noqa: F401  (re-exported)
+
+from predictive_representations_rl.analysis.probing import probe, probe_table, skip_reason  # noqa: F401  (re-exported)
 
 from predictive_representations_rl.analysis import plotting
 from predictive_representations_rl.analysis.base import Analyzer

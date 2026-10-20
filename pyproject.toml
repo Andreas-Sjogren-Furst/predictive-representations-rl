@@ -12,7 +12,6 @@ dependencies = [
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
     "pyyaml>=6.0.3",
-    "rl-lab",
     "scikit-learn>=1.9.1",
 ]
 
@@ -28,14 +27,6 @@ dev = [
     "pytest>=9.1.1",
 ]
 
-[tool.uv.workspace]
-members = ["packages/rl-lab"]
-
-[tool.uv.sources]
-rl-lab = { workspace = true }
-
 [tool.pytest.ini_options]
-testpaths = ["tests", "packages/rl-lab/tests"]
+testpaths = ["tests"]
 norecursedirs = ["third_party", ".venv", ".venvs", ".git"]
-# Test files in the two packages share names (e.g. test_cka.py).
-addopts = ["--import-mode=importlib"]

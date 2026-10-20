@@ -69,50 +69,6 @@ class OneStepFBAdapter(AlgorithmAdapter):
             return None
         return max(checkpoints, key=lambda path: int(re.findall(r"\d+", path.stem)[-1]))
 
-    def checkpoint_step(self, run: ResolvedRun, checkpoint: Path) -> tuple[int, str]:
-        return int(re.findall(r"\d+", checkpoint.stem)[-1]), "gradient_steps"
-
-    def view_protocol(self, run: ResolvedRun, view: str, info: dict[str, Any]) -> dict[str, Any]:
-        base = view.removesuffix("_untrained")
-        protocol: dict[str, Any] = {
-            "input": "final_state_and_action",
-            "conditioning": {"type": "none"},
-            "stochastic": False,
-            "note": "final state of each probe window with the dataset action taken there, clipped as in training",
-        }
-        if base == "forward":
-            protocol["note"] += "; mean over the forward ensemble"
-        if base == "q_values":
-            protocol["conditioning"] = {
-                "type": "inferred_z_per_task",
-                "tasks": info.get("tasks", []),
-                "source": "z inferred per task from reward-labelled validation data, as main.py does; Q = F(s,a)·z",
-            }
-        return protocol
-
-    def budget(self, run: ResolvedRun) -> dict[str, int | None]:
-        return {"gradient_steps": int(run.config.budget.get("train_steps", DEFAULT_TRAIN_STEPS)), "env_steps": 0}
-
-    def native_metrics(self, run: ResolvedRun) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        import csv
-
-        training, evaluation = [], []
-        for path in run.native_dir.rglob("train.csv"):
-            for row in csv.DictReader(open(path)):
-                step = int(float(row.pop("step")))
-                for metric, value in row.items():
-                    if value not in ("", None):
-                        training.append({"training_step": step, "step_unit": "gradient_steps", "metric": metric, "value": float(value)})
-        for path in run.native_dir.rglob("eval.csv"):
-            for row in csv.DictReader(open(path)):
-                step = int(float(row.pop("step")))
-                for column, value in row.items():
-                    match = re.fullmatch(r"evaluation/(.+)_episode\.return", column)
-                    if match and match.group(1) != "overall" and value not in ("", None):
-                        evaluation.append({"training_step": step, "step_unit": "gradient_steps", "task": match.group(1),
-                                           "metric": "episode_return", "value": float(value)})
-        return training, evaluation
-
     def experience(self, run: ResolvedRun) -> dict[str, Any]:
         return {
             "env_steps": 0,

@@ -8,6 +8,11 @@ Findings from runs of the harness, newest first. Numbers come from the standard 
 
 ## 2026-10-13 — point_mass_maze: one-step FB vs DreamerV3
 
+> **Historical (2026-10-20).** The project now focuses on FB-style zero-shot agents; DreamerV3 was dropped. Its
+> code, configs and runs were removed and are recoverable from the git tag `dreamer-comparison-2026-10`; the
+> DreamerV3 findings below are kept as a record. The FB results (setup, alpha sweep, FB rows of the tables) remain
+> valid for the existing runs in `runs/point_mass_maze/onestep_fb/`.
+
 ### Setup
 
 **Environment.** `point_mass_maze` (ExORL custom DMC task): a point mass in a four-room maze, observations
