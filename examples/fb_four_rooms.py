@@ -20,6 +20,7 @@ from aeris.domain.results import RunManifest
 from aeris.domain.task import TaskSpec
 from aeris.environments import FourRooms
 from aeris.experiments import collect_transitions, evaluate_goal_policy, train_updates
+from aeris.visualization.four_rooms import save_policy_snapshot, render_four_rooms_report
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,6 +34,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--episodes", type=int, default=20)
     p.add_argument("--max-steps", type=int, default=60)
     p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--trajectories", type=int, default=3,
+                   help="Number of evaluation episodes to save per checkpoint (0 disables recording)")
+    p.add_argument("--plots", action="store_true",
+                   help="Render report PNGs after completing the experiment (requires matplotlib)")
     p.add_argument("--goal-row", type=int, default=9)
     p.add_argument("--goal-col", type=int, default=9)
     return p.parse_args()
@@ -42,6 +47,8 @@ def main() -> None:
     args = parse_args()
     if args.output.exists() and any(args.output.iterdir()):
         raise FileExistsError(f"output directory must be empty: {args.output}")
+    if args.trajectories < 0:
+        raise ValueError("trajectories must be nonnegative")
     if args.updates < 1 or args.batch_size < 1 or args.episodes < 1:
         raise ValueError("updates, batch-size and episodes must be positive")
     torch.set_num_threads(1)  # Fast and stable CPU behavior for a tiny diagnostic.
@@ -97,27 +104,42 @@ def main() -> None:
             representation_dim=32, hidden_dim=128, seed=args.seed))
         provider = FBTransitionSampler(transitions, batch_size=args.batch_size, seed=args.seed + 2)
         match_goal = lambda obs: bool(np.array_equal(obs, goal_observation))
+        initial_condition = agent.goal_condition(goal_observation)
+        save_policy_snapshot(agent, eval_env, initial_condition, args.output / "policy_initial.npz")
         initial = evaluate_goal_policy(
-            agent, eval_env, condition=agent.goal_condition(goal_observation), is_goal=match_goal,
+            agent, eval_env, condition=initial_condition, is_goal=match_goal,
             episodes=args.episodes, max_steps=args.max_steps, run_id=run_id,
-            task_id=task.task_id, checkpoint_id="initial_in_memory", seed=args.seed + 100)
+            task_id=task.task_id, checkpoint_id="initial_in_memory", seed=args.seed + 100,
+            on_trajectory=recorder.write_trajectory if args.trajectories else None,
+            max_trajectories=args.trajectories)
         recorder.write_evaluation(initial)
         training = train_updates(agent, provider, updates=args.updates, run_id=run_id,
                                  recorder=recorder, log_every=max(1, args.updates // 10))
         # Trusted local-only torch checkpoint. Never torch.load an untrusted file.
         torch.save({"agent": agent.state_dict(), "sampler": provider.state_dict()},
                    args.output / "checkpoint.pt")
+        final_condition = agent.goal_condition(goal_observation)
+        save_policy_snapshot(agent, eval_env, final_condition, args.output / "policy_final.npz")
         final = evaluate_goal_policy(
-            agent, eval_env, condition=agent.goal_condition(goal_observation), is_goal=match_goal,
+            agent, eval_env, condition=final_condition, is_goal=match_goal,
             episodes=args.episodes, max_steps=args.max_steps, run_id=run_id,
-            task_id=task.task_id, checkpoint_id="checkpoint.pt", seed=args.seed + 100)
+            task_id=task.task_id, checkpoint_id="checkpoint.pt", seed=args.seed + 100,
+            on_trajectory=recorder.write_trajectory if args.trajectories else None,
+            max_trajectories=args.trajectories)
         recorder.write_evaluation(final)
         recorder.write_manifest(RunManifest(run_id=run_id, experiment=spec,
             status="completed", selected_checkpoint="checkpoint.pt",
             provenance={"source": "AERIS demo, not Touati paper reproduction",
                         "numpy": np.__version__, "torch": torch.__version__,
                         "collection_seed": args.seed, "dataset_file": "dataset.npz",
-                        "dataset_sha256": fingerprint}))
+                        "dataset_sha256": fingerprint,
+                        "diagnostic_artifacts": {
+                            "policy_initial": "policy_initial.npz",
+                            "policy_final": "policy_final.npz",
+                            "trajectories": "trajectories.jsonl" if args.trajectories else None,
+                            "metric_file": "training_metrics.jsonl",
+                            "evaluation_file": "evaluations.jsonl",
+                        }}))
         print(f"Transitions: {len(transitions)} | gradient updates: {training.update_count}")
         for label, result in (("initial", initial), ("final", final)):
             print(label, {m.name: round(m.value, 4) for m in result.metrics})
@@ -130,6 +152,11 @@ def main() -> None:
     finally:
         env.close()
         eval_env.close()
+    # Plotting is deliberately outside the training exception/manifest logic.
+    # A rendering failure must not mark successfully completed training as failed.
+    if args.plots:
+        made = render_four_rooms_report(args.output)
+        print("Rendered:", ", ".join(str(f) for f in made))
 
 
 if __name__ == "__main__":

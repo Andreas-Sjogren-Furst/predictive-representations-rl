@@ -63,7 +63,7 @@ spec = ExperimentSpec(
 config = spec.to_dict()  # pure JSON-compatible snapshot, no algorithm instantiated
 ```
 
-See [`examples/specification.py`](../../examples/specification.py) for a task/evaluation example.
+See [`examples/fb_four_rooms.py`](../../examples/fb_four_rooms.py) for a complete experiment specification.
 
 ## Acceptance of Step 2
 
