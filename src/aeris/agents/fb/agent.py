@@ -7,10 +7,11 @@ Unlike the reference, this object does not own an environment or replay buffer.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
-from collections.abc import Mapping, Sequence
-from typing import Any
+import copy
 import math
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict
+from typing import Any
 
 import numpy as np
 import torch
@@ -19,9 +20,9 @@ from torch.nn import functional as F
 from aeris.domain.agent import ActionRequest, ActionResult
 from aeris.domain.results import MetricValue
 from aeris.domain.task import TaskSpec
-from .config import DiscreteFBConfig
 from .batch import FBTrainingBatch
-from .networks import ForwardMap, BackwardMap
+from .config import DiscreteFBConfig
+from .networks import BackwardMap, ForwardMap
 
 
 class DiscreteFBAgent:
@@ -34,13 +35,15 @@ class DiscreteFBAgent:
         # Isolate initialization from the global torch RNG.
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(config.seed)
-            self.forward_network = ForwardMap(config.observation_dim, config.representation_dim, config.num_actions, config.hidden_dim).to(self.device)
-            self.backward_network = BackwardMap(config.observation_dim, config.representation_dim, config.hidden_dim).to(self.device)
-            self.forward_target_network = ForwardMap(config.observation_dim, config.representation_dim, config.num_actions, config.hidden_dim).to(self.device)
-            self.backward_target_network = BackwardMap(config.observation_dim, config.representation_dim, config.hidden_dim).to(self.device)
+            self.forward_network = ForwardMap(
+                config.observation_dim, config.representation_dim, config.num_actions, config.hidden_dim
+            ).to(self.device)
+            self.backward_network = BackwardMap(
+                config.observation_dim, config.representation_dim, config.hidden_dim
+            ).to(self.device)
 
-        self.forward_target_network.load_state_dict(self.forward_network.state_dict())
-        self.backward_target_network.load_state_dict(self.backward_network.state_dict())
+        self.forward_target_network = copy.deepcopy(self.forward_network)
+        self.backward_target_network = copy.deepcopy(self.backward_network)
         self.forward_target_network.requires_grad_(False)
         self.backward_target_network.requires_grad_(False)
 
@@ -53,6 +56,13 @@ class DiscreteFBAgent:
         self.rng.manual_seed(config.seed + 1)
 
         self.updates = 0
+
+    @classmethod
+    def from_state_dict(cls, state: Mapping[str, Any], *, device: str = "cpu") -> DiscreteFBAgent:
+        """Rebuild an agent from ``state_dict()`` output, optionally on another device."""
+        agent = cls(DiscreteFBConfig(**{**state["config"], "device": device}))
+        agent.load_state_dict(state)
+        return agent
 
     def _observations(self, value: Any, *, label: str = "observations") -> torch.Tensor:
         data = torch.as_tensor(value, dtype=torch.float32, device=self.device)
@@ -77,12 +87,40 @@ class DiscreteFBAgent:
             if z.shape == (1, self.config.representation_dim):
                 z = z.expand(batch_size, -1)
             else:
-                raise ValueError(f"condition must have shape [B, {self.config.representation_dim}] or [{self.config.representation_dim}]")
-            
+                d = self.config.representation_dim
+                raise ValueError(f"condition must have shape [B, {d}] or [{d}]")
         if not bool(torch.isfinite(z).all()):
             raise ValueError("condition must be finite")
-        
         return z
+
+    def _actions(self, actions: Any, count: int) -> torch.Tensor:
+        a = torch.as_tensor(actions, device=self.device)
+        if a.ndim != 1 or len(a) != count:
+            raise ValueError("actions must be [B]")
+        if a.dtype == torch.bool or a.is_complex():
+            raise ValueError("actions must be integer indices")
+        if a.is_floating_point() and not torch.equal(a, a.floor()):
+            raise ValueError("actions must be integer indices")
+        if bool(((a < 0) | (a >= self.config.num_actions)).any()):
+            raise ValueError("action index out of bounds")
+        return a.long()
+
+    @staticmethod
+    def _q_values(forward: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+        """Q(s, a, z) = F(s, a, z)^T z for every action: [B, d, A] x [B, d] -> [B, A]."""
+        return torch.einsum("bda,bd->ba", forward, z)
+
+    @staticmethod
+    def _select(forward: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        """Pick F(s, a, z) for the given actions: [B, d, A] -> [B, d]."""
+        index = actions[:, None, None].expand(-1, forward.shape[1], 1)
+        return forward.gather(2, index).squeeze(-1)
+
+    def _explore(self) -> bool:
+        return torch.rand((), generator=self.rng).item() < self.config.exploration_epsilon
+
+    def _boltzmann(self, q: torch.Tensor) -> torch.Tensor:
+        return F.softmax(q / self.config.temperature, dim=-1)
 
     @torch.no_grad()
     def sample_conditions(self, count: int, *, goals: Any | None = None) -> torch.Tensor:
@@ -91,7 +129,9 @@ class DiscreteFBAgent:
         mode, d = self.config.task_sampling, self.config.representation_dim
         if mode == "goal_oriented":
             if goals is None:
-                raise ValueError("goal_oriented sampling requires goal observations in the training batch")
+                raise ValueError(
+                    "goal_oriented sampling requires goal observations in the training batch"
+                )
             obs = self._observations(goals, label="goal observations")
             if len(obs) != count:
                 raise ValueError("goal count must match batch size")
@@ -109,11 +149,23 @@ class DiscreteFBAgent:
         return (math.sqrt(d) * directions * radii).to(self.device)
 
     @torch.no_grad()
+    def forward_map(self, observations: Any, condition: Any) -> torch.Tensor:
+        """Online forward vectors for every action, shape [B, d, A]."""
+        obs = self._observations(observations)
+        return self.forward_network(obs, self._conditions(condition, batch_size=len(obs)))
+
+    @torch.no_grad()
     def action_values(self, observations: Any, condition: Any) -> torch.Tensor:
         obs = self._observations(observations)
         z = self._conditions(condition, batch_size=len(obs))
-        f = self.forward_network(obs, z)
-        return torch.einsum("bda,bd->ba", f, z)
+        return self._q_values(self.forward_network(obs, z), z)
+
+    @torch.no_grad()
+    def target_policy(self, observations: Any, condition: Any) -> torch.Tensor:
+        """Boltzmann policy of the target forward network used in training, [B, A]."""
+        obs = self._observations(observations)
+        z = self._conditions(condition, batch_size=len(obs))
+        return self._boltzmann(self._q_values(self.forward_target_network(obs, z), z))
 
     @torch.no_grad()
     def act(self, request: ActionRequest) -> ActionResult:
@@ -126,7 +178,8 @@ class DiscreteFBAgent:
             raise ValueError("act() expects one observation, not a batch")
         values = self.action_values(obs, request.condition)
         greedy = int(values.argmax(dim=-1).item())
-        if not request.deterministic and torch.rand((), generator=self.rng).item() < self.config.exploration_epsilon:
+        # Draw from the RNG only for stochastic requests so evaluation never shifts it.
+        if not request.deterministic and self._explore():
             greedy = int(torch.randint(self.config.num_actions, (), generator=self.rng).item())
         return ActionResult(action=greedy)
 
@@ -156,29 +209,13 @@ class DiscreteFBAgent:
 
     @torch.no_grad()
     def forward_features(self, observations: Any, actions: Any, condition: Any) -> torch.Tensor:
-        """Inspect selected forward vectors, shape [B, d]."""
-        obs = self._observations(observations)
-        z = self._conditions(condition, batch_size=len(obs))
-        acts = self._actions(actions, len(obs))
-        return self.forward_network(obs, z).gather(
-            dim=2, index=acts[:, None, None].expand(-1, self.config.representation_dim, 1)
-        ).squeeze(-1).clone()
+        """Forward vectors of the given actions, shape [B, d]."""
+        forward = self.forward_map(observations, condition)
+        return self._select(forward, self._actions(actions, len(forward)))
 
     @torch.no_grad()
     def backward_features(self, observations: Any) -> torch.Tensor:
-        return self.backward_network(self._observations(observations)).clone()
-
-    def _actions(self, actions: Any, count: int) -> torch.Tensor:
-        a = torch.as_tensor(actions, device=self.device)
-        if a.ndim != 1 or len(a) != count:
-            raise ValueError("actions must be [B]")
-        if a.dtype == torch.bool or not (torch.is_floating_point(a) or a.dtype in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8)):
-            raise ValueError("actions must be integer indices")
-        if torch.is_floating_point(a) and not bool(torch.all(a == torch.floor(a))):
-            raise ValueError("actions must be integer indices")
-        if not bool(torch.isfinite(a.float()).all()) or not bool(((a >= 0) & (a < self.config.num_actions)).all()):
-            raise ValueError("action index out of bounds")
-        return a.long()
+        return self.backward_network(self._observations(observations))
 
     def update(self, batch: FBTrainingBatch) -> tuple[MetricValue, ...]:
         obs = self._observations(batch.observations)
@@ -189,24 +226,23 @@ class DiscreteFBAgent:
             raise ValueError("all three observation batches must have the same size")
         actions = self._actions(batch.actions, n)
         w = self.sample_conditions(n, goals=batch.goal_observations)
-        d = self.config.representation_dim
 
         # Reference: policy induced by the *target* forward network.
         with torch.no_grad():
             target_next = self.forward_target_network(nxt, w)
-            q_next = torch.einsum("bda,bd->ba", target_next, w)
-            pi = F.softmax(q_next / self.config.temperature, dim=-1)
+            pi = self._boltzmann(self._q_values(target_next, w))
             entropy = -(pi * pi.clamp_min(1e-30).log()).sum(dim=-1).mean()
             f_next = torch.einsum("bda,ba->bd", target_next, pi)
             b_other_target = self.backward_target_network(other)
             target_successor = f_next @ b_other_target.T
 
-        f = self.forward_network(obs, w).gather(2, actions[:, None, None].expand(-1, d, 1)).squeeze(-1)
+        f = self._select(self.forward_network(obs, w), actions)
         b = self.backward_network(obs)
         b_other = self.backward_network(other)
         successor = f @ b_other.T
         diagonal = (f * b).sum(dim=-1)
-        fb_loss = 0.5 * (successor - self.config.gamma * target_successor).square().mean() - diagonal.mean()
+        td_error = successor - self.config.gamma * target_successor
+        fb_loss = 0.5 * td_error.square().mean() - diagonal.mean()
 
         # Intentionally asymmetric detach placement from original FB grid loss.
         b_b_other = b @ b_other.T
@@ -214,7 +250,9 @@ class DiscreteFBAgent:
         b_b_detach = (b * b.detach()).sum(dim=-1)
         # Upstream multiplies a [B] vector by a [B,B] matrix: broadcasting
         # aligns the vector to the *columns* (not the rows).
-        reg_loss = (b_b_detach[None, :] * b_b_other.detach()).mean() - b_b_other_detach.mean()
+        reg_loss = (
+            (b_b_detach[None, :] * b_b_other.detach()).mean() - b_b_other_detach.mean()
+        )
         total_loss = fb_loss + self.config.regularization_coefficient * reg_loss
         if not bool(torch.isfinite(total_loss)):
             raise FloatingPointError("FB loss became nonfinite")
@@ -226,10 +264,10 @@ class DiscreteFBAgent:
             self._polyak_update(self.backward_target_network, self.backward_network)
         self.updates += 1
         return (
-            MetricValue(name="fb_loss", value=float(fb_loss.detach()), unit="unitless", aggregation="instant"),
-            MetricValue(name="fb_regularization", value=float(reg_loss.detach()), unit="unitless", aggregation="instant"),
-            MetricValue(name="total_loss", value=float(total_loss.detach()), unit="unitless", aggregation="instant"),
-            MetricValue(name="target_policy_entropy", value=float(entropy.detach()), unit="nats", aggregation="mean"),
+            MetricValue("fb_loss", float(fb_loss.detach()), "unitless", "instant"),
+            MetricValue("fb_regularization", float(reg_loss.detach()), "unitless", "instant"),
+            MetricValue("total_loss", float(total_loss.detach()), "unitless", "instant"),
+            MetricValue("target_policy_entropy", float(entropy.detach()), "nats", "mean"),
         )
 
     def _polyak_update(self, target: torch.nn.Module, source: torch.nn.Module) -> None:
@@ -249,7 +287,8 @@ class DiscreteFBAgent:
         }
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        if state["config"] != asdict(self.config):
+        # The device is a placement choice, not a hyperparameter.
+        if {**state["config"], "device": self.config.device} != asdict(self.config):
             raise ValueError("FB checkpoint configuration differs from agent configuration")
         self.forward_network.load_state_dict(state["forward"])
         self.backward_network.load_state_dict(state["backward"])

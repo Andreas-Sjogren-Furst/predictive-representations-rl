@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from aeris.analysis.four_rooms import build_four_rooms_oracle, compare_four_rooms_snapshot
+from aeris.analysis.four_rooms import build_four_rooms_oracle, load_policy_actions
 from aeris.analysis.tabular import compare_deterministic_policy, value_iteration
 from aeris.environments import FourRooms
 
@@ -61,7 +61,8 @@ def test_snapshot_alignment_with_shuffled_state_order(tmp_path):
     order = np.random.default_rng(2).permutation(len(positions))
     snap = tmp_path / "policy.npz"
     np.savez_compressed(snap, positions=positions[order], actions=actions[order])
-    aligned, diag = compare_four_rooms_snapshot(snap, model, max_steps=100)
+    aligned = load_policy_actions(snap, model.positions)
+    diag = model.compare(aligned, max_steps=100)
     assert np.array_equal(aligned, actions)
     assert diag.optimal_action_fraction == 1.
 
@@ -74,7 +75,7 @@ def test_snapshot_missing_state_rejected(tmp_path):
     snap = tmp_path / "bad.npz"
     np.savez_compressed(snap, positions=positions, actions=np.zeros(len(positions), dtype=int))
     with pytest.raises(ValueError, match="don't match"):
-        compare_four_rooms_snapshot(snap, model)
+        load_policy_actions(snap, model.positions)
 
 
 def test_bad_mdp_input_and_discount_rejected():

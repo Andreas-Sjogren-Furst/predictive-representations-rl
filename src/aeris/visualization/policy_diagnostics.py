@@ -2,36 +2,33 @@
 
 These are Four Rooms-specific renderings, not part of the generic RL runner.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
+
 import numpy as np
 
-from aeris.analysis.four_rooms import FourRoomsOracle
+from aeris.analysis.four_rooms import FourRoomsOracle, TabularPolicyAnalysis
 from aeris.analysis.tabular import PolicyDiagnostics
 from aeris.environments import FourRooms
-from aeris.visualization.four_rooms import _draw_map, _plot_lib
+from aeris.visualization._plotting import ACTION_ARROWS, draw_grid, pyplot, save_figure
 
-_ARROWS = {0: "↑", 1: "↓", 2: "←", 3: "→"}
+OPTIMAL_COLOR = "#16803c"
+SUBOPTIMAL_COLOR = "#d12626"
 
 
 def render_optimal_policy(oracle: FourRoomsOracle, output_file: str | Path) -> Path:
     """Display *all* optimal choices per state; ties are not arbitrarily discarded."""
-    plt, _ = _plot_lib()
-    env = FourRooms()
-    fig, ax = plt.subplots(figsize=(7, 7))
-    _draw_map(ax, env, oracle.goal)
+    fig, ax = pyplot().subplots(figsize=(7, 7))
+    draw_grid(ax, FourRooms(), oracle.goal)
     for i, (row, col) in enumerate(oracle.positions):
         if i == oracle.goal_index:
             continue
-        symbols = "".join(_ARROWS[a] for a in np.flatnonzero(oracle.optimal.optimal_actions[i]))
+        symbols = "".join(ACTION_ARROWS[a] for a in np.flatnonzero(oracle.optimal.optimal_actions[i]))
         ax.text(col, row, symbols, ha="center", va="center", fontsize=8.5)
     ax.set_title("Exact optimal actions · all equally optimal actions shown")
-    path = Path(output_file)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
+    return save_figure(fig, output_file, dpi=150)
 
 
 def render_policy_gap(
@@ -43,24 +40,42 @@ def render_policy_gap(
     label: str = "Policy",
 ) -> Path:
     """Green = chosen action optimal (including ties), red = suboptimal."""
-    plt, _ = _plot_lib()
     from matplotlib.lines import Line2D
-    env = FourRooms()
-    fig, ax = plt.subplots(figsize=(7, 7))
-    _draw_map(ax, env, oracle.goal)
+
+    fig, ax = pyplot().subplots(figsize=(7, 7))
+    draw_grid(ax, FourRooms(), oracle.goal)
     for i, (row, col) in enumerate(oracle.positions):
         if i == oracle.goal_index:
             continue
-        ax.text(col, row, _ARROWS[int(actions[i])], ha="center", va="center",
-                fontsize=14, fontweight="bold",
-                color="#16803c" if diagnostics.optimal_by_state[i] else "#d12626")
-    ax.set_title(f"{label} · optimal choices {diagnostics.optimal_action_fraction:.0%}"
-                 f" · all-start success {diagnostics.rollout_success_fraction:.0%}")
-    ax.legend(handles=[Line2D([], [], marker="$✓$", linestyle="None", color="#16803c", label="Optimal choice"),
-                       Line2D([], [], marker="$×$", linestyle="None", color="#d12626", label="Suboptimal choice")],
-              loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2)
-    path = Path(output_file)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return path
+        color = OPTIMAL_COLOR if diagnostics.optimal_by_state[i] else SUBOPTIMAL_COLOR
+        ax.text(
+            col, row, ACTION_ARROWS[int(actions[i])],
+            ha="center", va="center", fontsize=14, fontweight="bold", color=color,
+        )
+    ax.set_title(
+        f"{label} · optimal choices {diagnostics.optimal_action_fraction:.0%}"
+        f" · all-start success {diagnostics.rollout_success_fraction:.0%}"
+    )
+    legend = [
+        Line2D([], [], marker="$✓$", linestyle="None", color=OPTIMAL_COLOR, label="Optimal choice"),
+        Line2D([], [], marker="$×$", linestyle="None", color=SUBOPTIMAL_COLOR, label="Suboptimal choice"),
+    ]
+    ax.legend(handles=legend, loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2)
+    return save_figure(fig, output_file, dpi=150)
+
+
+def render_tabular_policy_figures(analysis: TabularPolicyAnalysis, output_dir: str | Path) -> tuple[Path, ...]:
+    """Render the optimal policy and one policy-gap map per analyzed snapshot."""
+    output = Path(output_dir)
+    made = [render_optimal_policy(analysis.oracle, output / "optimal_policy.png")]
+    for phase, snapshot in analysis.snapshots.items():
+        made.append(
+            render_policy_gap(
+                analysis.oracle,
+                snapshot.actions,
+                snapshot.diagnostics,
+                output / f"policy_gap_{phase}.png",
+                label=phase.capitalize(),
+            )
+        )
+    return tuple(made)

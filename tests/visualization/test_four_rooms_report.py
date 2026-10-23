@@ -4,7 +4,7 @@ import pytest
 
 from aeris.domain.agent import ActionResult
 from aeris.environments import FourRooms
-from aeris.visualization.four_rooms import save_policy_snapshot
+from aeris.analysis.four_rooms import save_policy_snapshot
 
 
 class DownRight:

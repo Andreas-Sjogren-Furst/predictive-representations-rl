@@ -44,8 +44,8 @@ Finally, use the existing exact first-hit/terminal-goal analysis on the greedy p
 ## Usage
 
 ```bash
-uv run --extra fb-torch python examples/diagnose_fb_four_rooms.py runs/fb_four_rooms_visual
-uv run --extra fb-torch --extra viz python examples/diagnose_fb_four_rooms.py runs/fb_four_rooms_visual --plots
+uv run --extra fb-torch python examples/four_rooms_report.py diagnose runs/fb_four_rooms_visual
+uv run --extra fb-torch --extra viz python examples/four_rooms_report.py diagnose runs/fb_four_rooms_visual --plots
 ```
 
 Outputs are new *derived* artifacts (the original run is not overwritten):
