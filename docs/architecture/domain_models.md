@@ -49,7 +49,7 @@ This iteration distinguishes two categories:
 ## Declarative example
 
 ```python
-from thesis.domain import ComponentSpec, ExperimentSpec, TrainingPlan
+from aeris.domain import ComponentSpec, ExperimentSpec, TrainingPlan
 
 spec = ExperimentSpec(
     name="fb_four_rooms",

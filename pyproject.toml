@@ -7,7 +7,9 @@ authors = [
     { name = "Andreas-Sjogren-Furst", email = "91537952+Andreas-Sjogren-Furst@users.noreply.github.com" },
 ]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "numpy>=1.26,<3",
+]
 
 [build-system]
 requires = ["hatchling>=1.27,<2"]
@@ -19,19 +21,32 @@ packages = ["src/aeris"]
 [dependency-groups]
 dev = [
     "pytest>=8,<10",
+    "ruff>=0.6",
 ]
 
 [project.optional-dependencies]
 fb-torch = [
     "torch>=2.3,<3",
-    "numpy>=1.26,<3",
 ]
 viz = [
-    "matplotlib>=3.9,<4"
+    "matplotlib>=3.9,<4",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = [".git", ".venv", "third_party", "runs"]
-pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Optional-dependency tests call pytest.importorskip before importing AERIS.
+"tests/**" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["aeris"]
 

@@ -61,8 +61,8 @@ All these capabilities are grouped by component; there is **no universal do-ever
 ## Minimal contract examples
 
 ```python
-from thesis.contracts import Agent, TrainableAgent
-from thesis.domain import ActionRequest, ActionResult, MetricValue
+from aeris.contracts import Agent, TrainableAgent
+from aeris.domain import ActionRequest, ActionResult, MetricValue
 
 class RandomPolicy:
     def act(self, request: ActionRequest) -> ActionResult:
