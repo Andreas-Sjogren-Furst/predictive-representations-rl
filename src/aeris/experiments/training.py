@@ -7,6 +7,7 @@ from aeris.contracts.agent import TrainableAgent
 from aeris.contracts.dataset import BatchProvider
 from aeris.contracts.recorder import RunRecorder
 from aeris.domain.results import MetricValue, TrainingMetricRecord
+from aeris.domain.validation import require_int
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,12 +26,9 @@ def train_updates(
     The runner never needs to know the learner's network layout, loss or RNG.
     `start_step` is the number of prior updates in a resumed run.
     """
-    if type(updates) is not int or updates < 0:
-        raise ValueError("updates must be a nonnegative integer")
-    if type(start_step) is not int or start_step < 0:
-        raise ValueError("start_step must be a nonnegative integer")
-    if type(log_every) is not int or log_every < 1:
-        raise ValueError("log_every must be positive")
+    require_int("updates", updates)
+    require_int("start_step", start_step)
+    require_int("log_every", log_every, minimum=1)
     last: tuple[MetricValue, ...] = ()
     for ix in range(1, updates + 1):
         last = tuple(agent.update(batches.next_batch()))

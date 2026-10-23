@@ -13,6 +13,7 @@ import numpy as np
 
 from aeris.domain.environment import ResetResult, StepResult
 from aeris.domain.experience import Transition
+from aeris.domain.validation import require_int
 
 
 class FourRooms:
@@ -26,8 +27,7 @@ class FourRooms:
     ACTIONS: tuple[tuple[int, int], ...] = ((-1, 0), (1, 0), (0, -1), (0, 1))
 
     def __init__(self, *, max_episode_steps: int = 100, start_position: tuple[int, int] | None = None):
-        if type(max_episode_steps) is not int or max_episode_steps < 1:
-            raise ValueError("max_episode_steps must be a positive integer")
+        require_int("max_episode_steps", max_episode_steps, minimum=1)
         self.max_episode_steps = max_episode_steps
         self.num_actions = len(self.ACTIONS)
         self.observation_dim = self.WIDTH * self.HEIGHT

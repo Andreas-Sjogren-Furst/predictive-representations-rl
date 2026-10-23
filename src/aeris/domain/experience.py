@@ -1,9 +1,13 @@
 from dataclasses import dataclass
-from math import isfinite
 from typing import Any
+
+from .validation import require_finite_number
+
 
 @dataclass(frozen=True, slots=True)
 class Transition:
+    """One recorded step. ``None`` marks unknown reward or episode boundaries."""
+
     observation: Any
     action: Any
     next_observation: Any
@@ -16,10 +20,5 @@ class Transition:
             value = getattr(self, name)
             if value is not None and not isinstance(value, bool):
                 raise TypeError(f"{name} must be bool or None")
-            
         if self.reward is not None:
-            if isinstance(self.reward, bool) or not isinstance(self.reward, (int, float)):
-                raise TypeError("reward must be a scalar number or None")
-            
-            if not isfinite(self.reward):
-                raise ValueError("reward must be finite")
+            require_finite_number("reward", self.reward)

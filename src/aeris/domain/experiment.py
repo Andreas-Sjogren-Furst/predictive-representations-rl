@@ -2,8 +2,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from ._json import freeze_settings, require_identifier, require_seed, to_plain_data
+from .serialization import freeze_settings, to_json_data
 from .task import TaskEvidenceRef, TaskSpec
+from .validation import require_identifier, require_int
 
 TrainingMode = Literal["offline", "online", "hybrid", "none"]
 
@@ -45,14 +46,7 @@ class EvaluationPlan:
         object.__setattr__(self, "targets", tuple(self.targets))
         if not self.targets:
             raise ValueError("evaluation needs at least one target")
-        
-        identities = [(
-                target.task.task_id,
-                None if target.inference_evidence is None else target.inference_evidence.source_id,
-                None if target.inference_evidence is None else target.inference_evidence.split,
-            ) for target in self.targets
-        ]
-
+        identities = [(target.task.task_id, target.inference_evidence) for target in self.targets]
         if len(identities) != len(set(identities)):
             raise ValueError("duplicate task/evidence evaluation target")
 
@@ -70,25 +64,21 @@ class ExperimentSpec:
 
     def __post_init__(self) -> None:
         require_identifier("experiment name", self.name)
-        require_seed("seed", self.seed)
+        require_int("seed", self.seed)
 
         if self.environment is None and self.dataset is None:
             raise ValueError("an environment or a dataset is required")
-        
         if self.training.mode in ("offline", "hybrid") and self.dataset is None:
             raise ValueError("offline/hybrid training requires a dataset")
-        
         if self.training.mode in ("online", "hybrid") and self.environment is None:
             raise ValueError("online/hybrid training requires an environment")
-        
         if self.training.mode == "none" and not self.initial_checkpoint:
             raise ValueError("evaluation-only runs require an initial checkpoint")
 
         if self.training.mode == "none" and self.evaluation is None:
             raise ValueError("evaluation-only experiments require an evaluation plan")
-        
         if self.initial_checkpoint is not None:
             require_identifier("initial_checkpoint", self.initial_checkpoint)
 
     def to_dict(self) -> dict[str, Any]:
-        return to_plain_data(self)
+        return to_json_data(self)

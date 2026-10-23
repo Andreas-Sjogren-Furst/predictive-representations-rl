@@ -8,6 +8,7 @@ import numpy as np
 
 from aeris.contracts.environment import Environment
 from aeris.domain.experience import Transition
+from aeris.domain.validation import require_int
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,8 +24,8 @@ def collect_transitions(env: Environment, *, count: int, seed: int, choose_actio
     Reset with `seed` once; later resets advance the environment's own RNG.
     The action selection RNG is separate and deterministic.
     """
-    if type(count) is not int or count <= 0 or type(seed) is not int or seed < 0:
-        raise ValueError("count must be positive and seed must be nonnegative")
+    require_int("count", count, minimum=1)
+    require_int("seed", seed)
     rng = np.random.default_rng(seed + 1)
     obs = env.reset(seed=seed).observation
     collected: list[Transition] = []
@@ -32,7 +33,10 @@ def collect_transitions(env: Environment, *, count: int, seed: int, choose_actio
     for _ in range(count):
         action = choose_action(obs, rng)
         result = env.step(action)
-        collected.append(Transition(observation=obs, action=action, next_observation=result.observation, reward=result.reward, terminated=result.terminated, truncated=result.truncated))
+        collected.append(Transition(
+            observation=obs, action=action, next_observation=result.observation,
+            reward=result.reward, terminated=result.terminated, truncated=result.truncated,
+        ))
         obs = result.observation
         if result.terminated or result.truncated:
             completed += 1

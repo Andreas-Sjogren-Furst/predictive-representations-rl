@@ -2,8 +2,9 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from math import isfinite
 from typing import Any
+
+from .validation import require_finite_number
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +31,4 @@ class StepResult:
         if type(self.terminated) is not bool or type(self.truncated) is not bool:
             raise TypeError("environment end flags must be bool")
         if self.reward is not None:
-            if isinstance(self.reward, bool) or not isinstance(self.reward, (int, float)):
-                raise TypeError("reward must be a scalar number or None")
-            if not isfinite(self.reward):
-                raise ValueError("reward must be finite")
+            require_finite_number("reward", self.reward)

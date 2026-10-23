@@ -8,6 +8,7 @@ from aeris.contracts.environment import Environment
 from aeris.domain.agent import ActionRequest
 from aeris.domain.results import EvaluationRecord, MetricValue
 from aeris.domain.trajectory import EvaluationTrajectory, TrajectoryStep
+from aeris.domain.validation import require_int
 
 
 def evaluate_goal_policy(
@@ -24,14 +25,10 @@ def evaluate_goal_policy(
     the policy and is never used as task-inference evidence. For large visual
     observations, avoid JSONL capture (use a binary artifact adapter later).
     """
-    if type(episodes) is not int or episodes < 1:
-        raise ValueError("episodes must be positive")
-    if type(max_steps) is not int or max_steps < 1:
-        raise ValueError("max_steps must be positive")
-    if max_trajectories is not None and (
-        type(max_trajectories) is not int or max_trajectories < 0
-    ):
-        raise ValueError("max_trajectories must be nonnegative or None")
+    require_int("episodes", episodes, minimum=1)
+    require_int("max_steps", max_steps, minimum=1)
+    if max_trajectories is not None:
+        require_int("max_trajectories", max_trajectories)
     successes = 0
     lengths: list[int] = []
     for episode in range(episodes):

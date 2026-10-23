@@ -2,7 +2,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from ._json import freeze_settings, require_identifier
+from .serialization import freeze_settings
+from .validation import require_identifier
 
 
 @dataclass(frozen=True, slots=True)

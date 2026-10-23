@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 
+from aeris.domain.validation import require_int
+
 
 @dataclass(frozen=True, slots=True)
 class OptimalValues:
@@ -47,8 +49,7 @@ def value_iteration(
         raise ValueError("tolerance must be positive and finite")
     if not np.isfinite(tie_tolerance) or tie_tolerance < 0:
         raise ValueError("tie_tolerance must be nonnegative and finite")
-    if type(max_iterations) is not int or max_iterations <= 0:
-        raise ValueError("max_iterations must be positive")
+    require_int("max_iterations", max_iterations, minimum=1)
 
     r = r.astype(np.float64)
     values = np.zeros(num_states, dtype=np.float64)
@@ -114,10 +115,10 @@ def compare_deterministic_policy(
         raise ValueError("actions must be valid integer choices for every state")
     if distances.shape != (num_states,) or np.any(distances < 0):
         raise ValueError("shortest_distances must be finite nonnegative lengths")
-    if type(goal_index) is not int or not 0 <= goal_index < num_states:
+    require_int("goal_index", goal_index)
+    if goal_index >= num_states:
         raise ValueError("goal_index is invalid")
-    if type(max_steps) is not int or max_steps <= 0:
-        raise ValueError("max_steps must be positive")
+    require_int("max_steps", max_steps, minimum=1)
     if optimal.action_values.shape != (num_states, num_actions):
         raise ValueError("optimal values are incompatible with environment")
 
