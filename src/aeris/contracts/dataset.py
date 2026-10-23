@@ -8,10 +8,9 @@ BatchT_co = TypeVar("BatchT_co", covariant=True)
 
 @runtime_checkable
 class TransitionSource(Protocol):
-    def iter_transitions(self) -> Iterator[Transition]:
-        ...
+    def iter_transitions(self) -> Iterator[Transition]: ...
+
 
 @runtime_checkable
 class BatchProvider(Protocol[BatchT_co]):
-    def next_batch(self) -> BatchT_co:
-        ...
+    def next_batch(self) -> BatchT_co: ...

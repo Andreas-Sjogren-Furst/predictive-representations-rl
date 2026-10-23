@@ -4,11 +4,13 @@ This is an AERIS diagnostic environment, not a claim to reproduce the
 maze layouts, data collection or reward conventions in the FB paper.
 Coordinates are (row, column). Actions: 0=up, 1=down, 2=left, 3=right.
 """
+
 from __future__ import annotations
 
 from collections import deque
 from collections.abc import Iterator
 from typing import Any
+
 import numpy as np
 
 from aeris.domain.environment import ResetResult, StepResult
@@ -22,11 +24,14 @@ class FourRooms:
     The observation is always a 121-dimensional one-hot vector. Reward is
     intentionally None: goal rewards are defined only by evaluation tasks.
     """
+
     WIDTH = 11
     HEIGHT = 11
     ACTIONS: tuple[tuple[int, int], ...] = ((-1, 0), (1, 0), (0, -1), (0, 1))
 
-    def __init__(self, *, max_episode_steps: int = 100, start_position: tuple[int, int] | None = None):
+    def __init__(
+        self, *, max_episode_steps: int = 100, start_position: tuple[int, int] | None = None
+    ):
         require_int("max_episode_steps", max_episode_steps, minimum=1)
         self.max_episode_steps = max_episode_steps
         self.num_actions = len(self.ACTIONS)
@@ -36,7 +41,12 @@ class FourRooms:
         self._walls -= {(5, 2), (5, 8), (2, 5), (8, 5)}
         self._walls |= {(0, i) for i in range(self.WIDTH)} | {(10, i) for i in range(self.WIDTH)}
         self._walls |= {(i, 0) for i in range(self.HEIGHT)} | {(i, 10) for i in range(self.HEIGHT)}
-        self.positions = tuple((r, c) for r in range(self.HEIGHT) for c in range(self.WIDTH) if (r, c) not in self._walls)
+        self.positions = tuple(
+            (r, c)
+            for r in range(self.HEIGHT)
+            for c in range(self.WIDTH)
+            if (r, c) not in self._walls
+        )
         if start_position is not None:
             self._check_position(start_position)
         self.start_position = start_position
@@ -77,10 +87,16 @@ class FourRooms:
     def reset(self, *, seed: int | None = None) -> ResetResult:
         if seed is not None:
             self._rng = np.random.default_rng(seed)
-        self._position = (self.start_position if self.start_position is not None else self.positions[int(self._rng.integers(len(self.positions)))])
+        self._position = (
+            self.start_position
+            if self.start_position is not None
+            else self.positions[int(self._rng.integers(len(self.positions)))]
+        )
         self._steps = 0
         self._done = False
-        return ResetResult(observation=self.observation_for(self._position), info={"position": self._position})
+        return ResetResult(
+            observation=self.observation_for(self._position), info={"position": self._position}
+        )
 
     def step(self, action: Any) -> StepResult:
         if self._position is None or self._done:
@@ -88,13 +104,23 @@ class FourRooms:
         self._position = self.next_position(self._position, action)
         self._steps += 1
         self._done = self._steps >= self.max_episode_steps
-        return StepResult(observation=self.observation_for(self._position), reward=None, terminated=False, truncated=self._done, info={"position": self._position, "steps": self._steps})
+        return StepResult(
+            observation=self.observation_for(self._position),
+            reward=None,
+            terminated=False,
+            truncated=self._done,
+            info={"position": self._position, "steps": self._steps},
+        )
 
     def all_transitions(self) -> Iterator[Transition]:
         """Oracle full-coverage dataset. Never used implicitly by the runner."""
         for pos in self.positions:
             for action in range(self.num_actions):
-                yield Transition(observation=self.observation_for(pos), action=action, next_observation=self.observation_for(self.next_position(pos, action)))
+                yield Transition(
+                    observation=self.observation_for(pos),
+                    action=action,
+                    next_observation=self.observation_for(self.next_position(pos, action)),
+                )
 
     def shortest_distance(self, start: tuple[int, int], goal: tuple[int, int]) -> int:
         """Exact tabular oracle distance for later diagnostic comparisons."""

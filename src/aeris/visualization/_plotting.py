@@ -40,9 +40,12 @@ def draw_grid(ax, env: FourRooms, goal: tuple[int, int]) -> None:
         for c in range(env.WIDTH):
             ax.add_patch(
                 Rectangle(
-                    (c - 0.5, r - 0.5), 1, 1,
+                    (c - 0.5, r - 0.5),
+                    1,
+                    1,
                     facecolor="1.0" if (r, c) in free else WALL_COLOR,
-                    edgecolor="0.8", linewidth=0.6,
+                    edgecolor="0.8",
+                    linewidth=0.6,
                 )
             )
     ax.plot(goal[1], goal[0], marker="*", markersize=15, label="Goal")

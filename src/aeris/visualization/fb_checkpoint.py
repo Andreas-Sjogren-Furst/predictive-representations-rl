@@ -8,7 +8,13 @@ from typing import Any
 import numpy as np
 
 from aeris.environments import FourRooms
-from aeris.visualization._plotting import GOAL_COLOR, WALL_COLOR, pyplot, save_figure, style_grid_axes
+from aeris.visualization._plotting import (
+    GOAL_COLOR,
+    WALL_COLOR,
+    pyplot,
+    save_figure,
+    style_grid_axes,
+)
 
 
 def render_fb_action_alignment(report: dict[str, Any], output_file: str | Path) -> Path:
@@ -27,7 +33,7 @@ def render_fb_action_alignment(report: dict[str, Any], output_file: str | Path) 
     grid = np.full((env.HEIGHT, env.WIDTH), np.nan, dtype=np.float64)
     expected = set(env.positions)
     visited = set()
-    for pos, good in zip(positions, agreement):
+    for pos, good in zip(positions, agreement, strict=True):
         point = (int(pos[0]), int(pos[1]))
         if point not in expected or point in visited or type(good) is not bool:
             raise ValueError("invalid or duplicate statewise FB diagnostic")
@@ -42,7 +48,10 @@ def render_fb_action_alignment(report: dict[str, Any], output_file: str | Path) 
     ax.imshow(
         np.ma.masked_invalid(grid),
         cmap=ListedColormap(["#dc7777", "#6eb79a"]),
-        vmin=0, vmax=1, interpolation="nearest", origin="upper",
+        vmin=0,
+        vmax=1,
+        interpolation="nearest",
+        origin="upper",
     )
     for r, c in expected:
         if (r, c) != goal:

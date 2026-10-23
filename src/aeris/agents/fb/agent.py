@@ -5,6 +5,7 @@ Preserves the all-action forward map, Boltzmann target expectation, FB loss,
 partially detached orthonormality regularizer, and Polyak target updates.
 Unlike the reference, this object does not own an environment or replay buffer.
 """
+
 from __future__ import annotations
 
 import copy
@@ -20,6 +21,7 @@ from torch.nn import functional as F
 from aeris.domain.agent import ActionRequest, ActionResult
 from aeris.domain.results import MetricValue
 from aeris.domain.task import TaskSpec
+
 from .batch import FBTrainingBatch
 from .config import DiscreteFBConfig
 from .networks import BackwardMap, ForwardMap
@@ -36,7 +38,10 @@ class DiscreteFBAgent:
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(config.seed)
             self.forward_network = ForwardMap(
-                config.observation_dim, config.representation_dim, config.num_actions, config.hidden_dim
+                config.observation_dim,
+                config.representation_dim,
+                config.num_actions,
+                config.hidden_dim,
             ).to(self.device)
             self.backward_network = BackwardMap(
                 config.observation_dim, config.representation_dim, config.hidden_dim
@@ -71,10 +76,10 @@ class DiscreteFBAgent:
 
         if data.ndim != 2 or data.shape[1] != self.config.observation_dim:
             raise ValueError(f"{label} must have shape [B, {self.config.observation_dim}]")
-        
+
         if not bool(torch.isfinite(data).all()):
             raise ValueError(f"{label} must be finite")
-        
+
         return data
 
     def _conditions(self, value: Any, *, batch_size: int) -> torch.Tensor:
@@ -192,7 +197,9 @@ class DiscreteFBAgent:
         return self.backward_network(obs).squeeze(0).clone()
 
     @torch.no_grad()
-    def infer_condition(self, task: TaskSpec, evidence: Sequence[tuple[Any, float]]) -> torch.Tensor:
+    def infer_condition(
+        self, task: TaskSpec, evidence: Sequence[tuple[Any, float]]
+    ) -> torch.Tensor:
         """Reward-weighted B features from pre-authorized state/reward pairs.
 
         The task supplies identity only; the caller must ensure evidence comes
@@ -201,8 +208,12 @@ class DiscreteFBAgent:
         del task
         if not evidence:
             raise ValueError("nonempty reward evidence is required")
-        obs = self._observations(np.stack([np.asarray(pair[0], dtype=np.float32) for pair in evidence]))
-        rewards = torch.as_tensor([pair[1] for pair in evidence], dtype=torch.float32, device=self.device)
+        obs = self._observations(
+            np.stack([np.asarray(pair[0], dtype=np.float32) for pair in evidence])
+        )
+        rewards = torch.as_tensor(
+            [pair[1] for pair in evidence], dtype=torch.float32, device=self.device
+        )
         if not bool(torch.isfinite(rewards).all()):
             raise ValueError("reward evidence must be finite")
         return (self.backward_network(obs) * rewards.unsqueeze(-1)).mean(dim=0).detach()
@@ -250,9 +261,7 @@ class DiscreteFBAgent:
         b_b_detach = (b * b.detach()).sum(dim=-1)
         # Upstream multiplies a [B] vector by a [B,B] matrix: broadcasting
         # aligns the vector to the *columns* (not the rows).
-        reg_loss = (
-            (b_b_detach[None, :] * b_b_other.detach()).mean() - b_b_other_detach.mean()
-        )
+        reg_loss = (b_b_detach[None, :] * b_b_other.detach()).mean() - b_b_other_detach.mean()
         total_loss = fb_loss + self.config.regularization_coefficient * reg_loss
         if not bool(torch.isfinite(total_loss)):
             raise FloatingPointError("FB loss became nonfinite")
@@ -271,7 +280,7 @@ class DiscreteFBAgent:
         )
 
     def _polyak_update(self, target: torch.nn.Module, source: torch.nn.Module) -> None:
-        for t, s in zip(target.parameters(), source.parameters()):
+        for t, s in zip(target.parameters(), source.parameters(), strict=True):
             t.mul_(self.config.polyak).add_(s, alpha=1.0 - self.config.polyak)
 
     def state_dict(self) -> dict[str, Any]:

@@ -1,5 +1,7 @@
 """Generic task-conditioned goal evaluation; task evidence is handled upstream."""
+
 from __future__ import annotations
+
 from collections.abc import Callable
 from typing import Any
 
@@ -12,9 +14,17 @@ from aeris.domain.validation import require_int
 
 
 def evaluate_goal_policy(
-    agent: Agent, env: Environment, *, condition: Any,
-    is_goal: Callable[[Any], bool], episodes: int, max_steps: int,
-    run_id: str, task_id: str, checkpoint_id: str, seed: int,
+    agent: Agent,
+    env: Environment,
+    *,
+    condition: Any,
+    is_goal: Callable[[Any], bool],
+    episodes: int,
+    max_steps: int,
+    run_id: str,
+    task_id: str,
+    checkpoint_id: str,
+    seed: int,
     protocol_id: str = "goal_reaching_v1",
     on_trajectory: Callable[[EvaluationTrajectory], None] | None = None,
     max_trajectories: int | None = None,
@@ -43,20 +53,29 @@ def evaluate_goal_policy(
         )
         steps: list[TrajectoryStep] = []
         while not success and length < max_steps:
-            result = agent.act(ActionRequest(
-                observation=obs, condition=condition,
-                policy_state=policy_state, deterministic=True,
-            ))
+            result = agent.act(
+                ActionRequest(
+                    observation=obs,
+                    condition=condition,
+                    policy_state=policy_state,
+                    deterministic=True,
+                )
+            )
             transition = env.step(result.action)
             nxt = transition.observation
             reached = bool(is_goal(nxt))
             if capture:
-                steps.append(TrajectoryStep(
-                    observation=obs, action=result.action,
-                    next_observation=nxt, reward=transition.reward,
-                    terminated=transition.terminated, truncated=transition.truncated,
-                    goal_reached=reached,
-                ))
+                steps.append(
+                    TrajectoryStep(
+                        observation=obs,
+                        action=result.action,
+                        next_observation=nxt,
+                        reward=transition.reward,
+                        terminated=transition.terminated,
+                        truncated=transition.truncated,
+                        goal_reached=reached,
+                    )
+                )
             obs = nxt
             policy_state = result.next_policy_state
             length += 1
@@ -66,20 +85,35 @@ def evaluate_goal_policy(
         successes += int(success)
         lengths.append(length)
         if capture:
-            on_trajectory(EvaluationTrajectory(
-                run_id=run_id, task_id=task_id,
-                checkpoint_id=checkpoint_id, protocol_id=protocol_id,
-                seed=episode_seed, episode_index=episode,
-                initial_observation=initial_obs,
-                steps=tuple(steps), success=success,
-            ))
+            on_trajectory(
+                EvaluationTrajectory(
+                    run_id=run_id,
+                    task_id=task_id,
+                    checkpoint_id=checkpoint_id,
+                    protocol_id=protocol_id,
+                    seed=episode_seed,
+                    episode_index=episode,
+                    initial_observation=initial_obs,
+                    steps=tuple(steps),
+                    success=success,
+                )
+            )
     return EvaluationRecord(
-        run_id=run_id, task_id=task_id, checkpoint_id=checkpoint_id,
-        protocol_id=protocol_id, seed=seed, episode_count=episodes,
+        run_id=run_id,
+        task_id=task_id,
+        checkpoint_id=checkpoint_id,
+        protocol_id=protocol_id,
+        seed=seed,
+        episode_count=episodes,
         metrics=(
-            MetricValue(name="success_rate", value=successes / episodes,
-                        unit="fraction", aggregation="mean"),
-            MetricValue(name="mean_episode_length", value=sum(lengths) / episodes,
-                        unit="steps", aggregation="mean"),
+            MetricValue(
+                name="success_rate", value=successes / episodes, unit="fraction", aggregation="mean"
+            ),
+            MetricValue(
+                name="mean_episode_length",
+                value=sum(lengths) / episodes,
+                unit="steps",
+                aggregation="mean",
+            ),
         ),
     )

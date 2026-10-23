@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from aeris.analysis.tabular_occupancy import exact_discounted_occupancy, centered_pearson
+from aeris.analysis.tabular_occupancy import centered_pearson, exact_discounted_occupancy
 
 
 def test_one_state_self_loop_has_geometric_visitation():
@@ -29,13 +29,13 @@ def test_two_state_chain_has_correct_analytic_first_action():
 def test_stochastic_policy_and_ill_formed_inputs():
     t = np.array([[0, 1], [0, 1]])
     pi = np.ones((2, 2)) / 2
-    m = exact_discounted_occupancy(t, pi, gamma=.9)
+    m = exact_discounted_occupancy(t, pi, gamma=0.9)
     assert np.allclose(m.sum(axis=-1), 10)
-    with pytest.raises(ValueError, match='sum to one'):
-        exact_discounted_occupancy(t, pi * 2, gamma=.9)
-    with pytest.raises(ValueError, match='next-state'):
-        exact_discounted_occupancy(np.array([[3, 1], [0, 1]]), pi, gamma=.9)
-    with pytest.raises(ValueError, match='gamma'):
+    with pytest.raises(ValueError, match="sum to one"):
+        exact_discounted_occupancy(t, pi * 2, gamma=0.9)
+    with pytest.raises(ValueError, match="next-state"):
+        exact_discounted_occupancy(np.array([[3, 1], [0, 1]]), pi, gamma=0.9)
+    with pytest.raises(ValueError, match="gamma"):
         exact_discounted_occupancy(t, pi, gamma=1)
 
 

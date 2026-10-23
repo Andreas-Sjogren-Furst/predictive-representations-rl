@@ -3,6 +3,7 @@
 This is intentionally NOT a universal analysis capability: only FB can expose
 F(s,a,z) and B(s). Numerical tabular occupancy lives in a generic module.
 """
+
 from __future__ import annotations
 
 import math
@@ -24,7 +25,7 @@ from aeris.environments import FourRooms
 def _effective_rank(matrix: np.ndarray) -> float:
     """Entropy effective rank of centered state features; 0 if constant."""
     _, singular, _ = np.linalg.svd(matrix - matrix.mean(axis=0, keepdims=True), full_matrices=False)
-    eig = singular ** 2
+    eig = singular**2
     if eig.sum() <= 1e-24:
         return 0.0
     p = eig[eig > 0] / eig.sum()
@@ -58,10 +59,14 @@ def _validate_oracle_dataset(run: FourRoomsRun, env: FourRooms) -> None:
         actions = saved["actions"]
         nxt = saved["next_observations"]
     needed = len(env.positions) * env.num_actions
-    if obs.shape != (needed, env.observation_dim) or nxt.shape != obs.shape or actions.shape != (needed,):
+    if (
+        obs.shape != (needed, env.observation_dim)
+        or nxt.shape != obs.shape
+        or actions.shape != (needed,)
+    ):
         raise ValueError("oracle dataset must contain exactly one sample per state-action")
     observed = set()
-    for o, a, after in zip(obs, actions, nxt):
+    for o, a, after in zip(obs, actions, nxt, strict=True):
         pos = env.position_of(o)
         if not isinstance(a, (np.integer, int)) or not 0 <= int(a) < env.num_actions:
             raise ValueError("oracle dataset contains invalid action")
@@ -86,7 +91,10 @@ def analyze_fb_checkpoint(run_dir: str | Path) -> dict:
     env = FourRooms()
     _validate_oracle_dataset(run, env)
     agent = _load_trusted_agent(run.root / "checkpoint.pt")
-    if agent.config.observation_dim != env.observation_dim or agent.config.num_actions != env.num_actions:
+    if (
+        agent.config.observation_dim != env.observation_dim
+        or agent.config.num_actions != env.num_actions
+    ):
         raise ValueError("checkpoint is incompatible with Four Rooms")
     oracle = build_four_rooms_oracle(env, run.goal, gamma=agent.config.gamma)
     n = len(oracle.positions)
@@ -100,7 +108,7 @@ def analyze_fb_checkpoint(run_dir: str | Path) -> dict:
     predicted_occupancy_density = np.einsum("sda,td->sat", f, b)
 
     if not np.isfinite(learned_q).all() or not np.isfinite(predicted_occupancy_density).all():
-        raise ValueError('nonfinite network predictions')
+        raise ValueError("nonfinite network predictions")
     # Oracle dataset is uniform over (state, action), hence rho(state)=1/S.
     expected_occupancy_density = n * exact_discounted_occupancy(
         oracle.next_state_indices, policy, gamma=agent.config.gamma
@@ -108,9 +116,11 @@ def analyze_fb_checkpoint(run_dir: str | Path) -> dict:
     non_goal = np.arange(n) != oracle.goal_index
     saved_policy = run.root / "policy_final.npz"
     if saved_policy.exists():
-        snapshot_actions = load_policy_actions(saved_policy, oracle.positions, num_actions=env.num_actions)
+        snapshot_actions = load_policy_actions(
+            saved_policy, oracle.positions, num_actions=env.num_actions
+        )
         if not np.array_equal(snapshot_actions, np.argmax(learned_q, axis=1)):
-            raise ValueError('saved final policy snapshot disagrees with the checkpoint')
+            raise ValueError("saved final policy snapshot disagrees with the checkpoint")
     # Compare relative action advantages, not absolute Q magnitudes. The FB
     # objective has density/normalization conventions unlike terminal returns.
     actual_goal = expected_occupancy_density[:, :, oracle.goal_index]
@@ -126,33 +136,44 @@ def analyze_fb_checkpoint(run_dir: str | Path) -> dict:
     entropy = -np.sum(policy * np.log(np.maximum(policy, 1e-300)), axis=1)
     first_hit = oracle.compare(a.astype(np.int64), max_steps=run.max_steps)
     report = {
-        'schema_version': 1,
-        'analysis': 'fb_four_rooms_checkpoint_v1',
-        'run_id': run.manifest['run_id'],
-        'checkpoint': 'checkpoint.pt',
-        'goal': list(run.goal),
-        'number_of_states': n,
-        'gradient_updates': agent.updates,
-        'gamma': agent.config.gamma,
-        'policy_temperature': agent.config.temperature,
-        'dataset_assumption': 'oracle full-coverage, uniform state density',
-        'policy_definition': 'Boltzmann of target F(s, a, z)^T z with training temperature',
-        'occupancy_definition': 'discounted CURRENT-STATE visitation under continuing policy (no terminal state)',
-        'evaluation_definition': 'first hitting goal within fixed horizon; terminal on entering goal',
-        'backward_effective_rank': _effective_rank(b),
-        'backward_goal_norm': float(np.linalg.norm(b[oracle.goal_index])),
-        'target_policy_mean_entropy_nats': float(entropy.mean()),
-        'target_policy_entropy_fraction_of_uniform': float(entropy.mean() / math.log(env.num_actions)),
-        'learned_action_spread_mean': float(np.std(learned_q[non_goal], axis=1).mean()),
-        'learned_action_margin_mean': float(margin[non_goal].mean()),
-        'state_positions': [list(pos) for pos in oracle.positions],
-        'state_action_improvement_agreement': [bool(item) for item in agreement],
-        'learned_action_counts_non_goal': [int(np.sum(a[non_goal] == action)) for action in range(env.num_actions)],
-        'exact_occupancy_correlation': centered_pearson(
-            predicted_occupancy_density[non_goal], expected_occupancy_density[non_goal]),
-        'goal_action_advantage_correlation': centered_pearson(centered_learned[non_goal], centered_exact[non_goal]),
-        'goal_action_agreement_with_exact_policy_improvement': float(agreement[non_goal].mean()),
-        'first_hit_goal_performance': first_hit.summary(),
+        "schema_version": 1,
+        "analysis": "fb_four_rooms_checkpoint_v1",
+        "run_id": run.manifest["run_id"],
+        "checkpoint": "checkpoint.pt",
+        "goal": list(run.goal),
+        "number_of_states": n,
+        "gradient_updates": agent.updates,
+        "gamma": agent.config.gamma,
+        "policy_temperature": agent.config.temperature,
+        "dataset_assumption": "oracle full-coverage, uniform state density",
+        "policy_definition": "Boltzmann of target F(s, a, z)^T z with training temperature",
+        "occupancy_definition": (
+            "discounted CURRENT-STATE visitation under continuing policy (no terminal state)"
+        ),
+        "evaluation_definition": (
+            "first hitting goal within fixed horizon; terminal on entering goal"
+        ),
+        "backward_effective_rank": _effective_rank(b),
+        "backward_goal_norm": float(np.linalg.norm(b[oracle.goal_index])),
+        "target_policy_mean_entropy_nats": float(entropy.mean()),
+        "target_policy_entropy_fraction_of_uniform": float(
+            entropy.mean() / math.log(env.num_actions)
+        ),
+        "learned_action_spread_mean": float(np.std(learned_q[non_goal], axis=1).mean()),
+        "learned_action_margin_mean": float(margin[non_goal].mean()),
+        "state_positions": [list(pos) for pos in oracle.positions],
+        "state_action_improvement_agreement": [bool(item) for item in agreement],
+        "learned_action_counts_non_goal": [
+            int(np.sum(a[non_goal] == action)) for action in range(env.num_actions)
+        ],
+        "exact_occupancy_correlation": centered_pearson(
+            predicted_occupancy_density[non_goal], expected_occupancy_density[non_goal]
+        ),
+        "goal_action_advantage_correlation": centered_pearson(
+            centered_learned[non_goal], centered_exact[non_goal]
+        ),
+        "goal_action_agreement_with_exact_policy_improvement": float(agreement[non_goal].mean()),
+        "first_hit_goal_performance": first_hit.summary(),
     }
     run.write_report("fb_checkpoint_v1.json", report)
     return report

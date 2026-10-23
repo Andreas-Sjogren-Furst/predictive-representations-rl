@@ -49,11 +49,14 @@ def test_environment_is_independent_and_can_build_a_transition():
     assert env.closed
 
 
-@pytest.mark.parametrize("values, error", [
-    ({"terminated": 0, "truncated": False}, TypeError),
-    ({"terminated": False, "truncated": None}, TypeError),
-    ({"terminated": True, "truncated": False, "reward": float("nan")}, ValueError),
-])
+@pytest.mark.parametrize(
+    "values, error",
+    [
+        ({"terminated": 0, "truncated": False}, TypeError),
+        ({"terminated": False, "truncated": None}, TypeError),
+        ({"terminated": True, "truncated": False, "reward": float("nan")}, ValueError),
+    ],
+)
 def test_invalid_step_result_is_rejected(values, error):
     defaults = {"observation": 1, "reward": 0.0, "terminated": False, "truncated": False}
     defaults.update(values)

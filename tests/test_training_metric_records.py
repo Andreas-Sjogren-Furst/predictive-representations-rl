@@ -5,7 +5,9 @@ from aeris.domain import MetricValue, TrainingMetricRecord
 
 def test_training_record_preserves_axis_and_serializes():
     record = TrainingMetricRecord(
-        "run-1", "environment_steps", 40,
+        "run-1",
+        "environment_steps",
+        40,
         (MetricValue("collection_rate", 2.5, "steps_per_second", "instant"),),
     )
     assert record.to_dict()["step_axis"] == "environment_steps"

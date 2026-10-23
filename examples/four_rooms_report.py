@@ -8,7 +8,8 @@ Commands:
 Examples:
   uv run --extra viz python examples/four_rooms_report.py render runs/fb_four_rooms
   uv run python examples/four_rooms_report.py analyze runs/fb_four_rooms --no-plots
-  uv run --extra fb-torch --extra viz python examples/four_rooms_report.py diagnose runs/fb_four_rooms --plots
+  uv run --extra fb-torch --extra viz python examples/four_rooms_report.py \
+      diagnose runs/fb_four_rooms --plots
 """
 
 from __future__ import annotations
@@ -56,12 +57,16 @@ def diagnose(args: argparse.Namespace) -> None:
     if args.plots:
         from aeris.visualization.fb_checkpoint import render_fb_action_alignment
 
-        path = render_fb_action_alignment(report, args.run_dir / "figures" / "fb_action_alignment.png")
+        path = render_fb_action_alignment(
+            report, args.run_dir / "figures" / "fb_action_alignment.png"
+        )
         print("Rendered:", path)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     render_parser = commands.add_parser("render", help="plot recorded run artifacts")
@@ -70,11 +75,16 @@ def parse_args() -> argparse.Namespace:
     analyze_parser = commands.add_parser("analyze", help="exact tabular policy analysis")
     analyze_parser.add_argument("--gamma", type=float, default=0.99)
     analyze_parser.add_argument(
-        "--no-plots", dest="plots", action="store_false", help="compute JSON only, no matplotlib needed"
+        "--no-plots",
+        dest="plots",
+        action="store_false",
+        help="compute JSON only, no matplotlib needed",
     )
     analyze_parser.set_defaults(handler=analyze)
 
-    diagnose_parser = commands.add_parser("diagnose", help="FB checkpoint diagnostics (oracle dataset runs)")
+    diagnose_parser = commands.add_parser(
+        "diagnose", help="FB checkpoint diagnostics (oracle dataset runs)"
+    )
     diagnose_parser.add_argument(
         "--plots", action="store_true", help="render an action-alignment map (requires matplotlib)"
     )

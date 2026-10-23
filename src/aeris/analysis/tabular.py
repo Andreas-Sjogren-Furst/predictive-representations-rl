@@ -4,9 +4,11 @@ This solver assumes discrete states/actions, known deterministic transitions,
 rewards received on transition, absorbing terminal states, and 0 <= gamma < 1.
 It does not claim to evaluate partially observed or stochastic environments.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import numpy as np
 
 from aeris.domain.validation import require_int
@@ -14,9 +16,9 @@ from aeris.domain.validation import require_int
 
 @dataclass(frozen=True, slots=True)
 class OptimalValues:
-    values: np.ndarray          # [state]
-    action_values: np.ndarray   # [state, action]
-    optimal_actions: np.ndarray # [state, action] bool, false at terminal states
+    values: np.ndarray  # [state]
+    action_values: np.ndarray  # [state, action]
+    optimal_actions: np.ndarray  # [state, action] bool, false at terminal states
     iterations: int
 
 
@@ -53,20 +55,20 @@ def value_iteration(
 
     r = r.astype(np.float64)
     values = np.zeros(num_states, dtype=np.float64)
-    for iteration in range(1, max_iterations + 1):
+    for iteration in range(1, max_iterations + 1):  # noqa: B007 (reported after the loop)
         q = r + gamma * values[states]
         q[done] = 0.0
         updated = q.max(axis=1)
-        if np.max(np.abs(updated - values)) <= tolerance:
-            values = updated
-            break
+        converged = np.max(np.abs(updated - values)) <= tolerance
         values = updated
+        if converged:
+            break
     else:
         raise RuntimeError("value iteration did not converge")
 
     action_values = r + gamma * values[states]
     action_values[done] = 0.0
-    is_optimal = (action_values >= (action_values.max(axis=1, keepdims=True) - tie_tolerance))
+    is_optimal = action_values >= (action_values.max(axis=1, keepdims=True) - tie_tolerance)
     is_optimal[done] = False  # No action choice is needed once the goal is reached.
     return OptimalValues(values, action_values, is_optimal, iteration)
 
@@ -111,7 +113,11 @@ def compare_deterministic_policy(
     act = np.asarray(actions)
     distances = np.asarray(shortest_distances)
     num_states, num_actions = nxt.shape
-    if act.shape != (num_states,) or act.dtype.kind not in "iu" or np.any((act < 0) | (act >= num_actions)):
+    if (
+        act.shape != (num_states,)
+        or act.dtype.kind not in "iu"
+        or np.any((act < 0) | (act >= num_actions))
+    ):
         raise ValueError("actions must be valid integer choices for every state")
     if distances.shape != (num_states,) or np.any(distances < 0):
         raise ValueError("shortest_distances must be finite nonnegative lengths")
@@ -144,8 +150,11 @@ def compare_deterministic_policy(
                 break
             seen.add(current)
     successful_starts = succeeded & non_goal
-    mean_excess = (float(np.mean(lengths[successful_starts] - distances[successful_starts]))
-                   if np.any(successful_starts) else None)
+    mean_excess = (
+        float(np.mean(lengths[successful_starts] - distances[successful_starts]))
+        if np.any(successful_starts)
+        else None
+    )
     return PolicyDiagnostics(
         optimal_action_fraction=float(np.mean(optimal_mask[non_goal])),
         mean_action_regret=float(np.mean(q_gap[non_goal])),

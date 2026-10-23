@@ -1,4 +1,5 @@
 import json
+
 import pytest
 
 from aeris.domain import (
@@ -7,8 +8,8 @@ from aeris.domain import (
     ExperimentSpec,
     MetricValue,
     RunManifest,
-    TrainingPlan,
     TaskEvidenceRef,
+    TrainingPlan,
 )
 
 
@@ -52,10 +53,16 @@ def test_evaluation_record_identifies_protocol_and_evidence():
 def test_evaluation_rejects_ambiguous_duplicate_metric_names():
     with pytest.raises(ValueError, match="duplicate"):
         EvaluationRecord(
-            run_id="r", checkpoint_id="c", task_id="t", protocol_id="p",
-            seed=1, episode_count=5,
-            metrics=(MetricValue("success", 0.5, "fraction", "mean"),
-                     MetricValue("success", 0.3, "fraction", "mean")),
+            run_id="r",
+            checkpoint_id="c",
+            task_id="t",
+            protocol_id="p",
+            seed=1,
+            episode_count=5,
+            metrics=(
+                MetricValue("success", 0.5, "fraction", "mean"),
+                MetricValue("success", 0.3, "fraction", "mean"),
+            ),
         )
 
 
@@ -68,6 +75,11 @@ def test_metrics_must_be_finite(value):
 def test_positive_episode_count_required():
     with pytest.raises(ValueError, match="episode_count"):
         EvaluationRecord(
-            run_id="r", checkpoint_id="c", task_id="t", protocol_id="p",
-            seed=0, episode_count=0, metrics=(),
+            run_id="r",
+            checkpoint_id="c",
+            task_id="t",
+            protocol_id="p",
+            seed=0,
+            episode_count=0,
+            metrics=(),
         )

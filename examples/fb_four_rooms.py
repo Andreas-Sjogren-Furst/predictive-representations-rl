@@ -37,10 +37,14 @@ HIDDEN_DIM = 128
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--output", type=Path, default=Path("runs/fb_four_rooms"))
     p.add_argument(
-        "--dataset", choices=["oracle", "random"], default="oracle",
+        "--dataset",
+        choices=["oracle", "random"],
+        default="oracle",
         help="Explicit full-coverage one-step transitions or collected random experience",
     )
     p.add_argument("--transitions", type=int, default=5000, help="Random collection size")
@@ -50,11 +54,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-steps", type=int, default=60)
     p.add_argument("--seed", type=int, default=7)
     p.add_argument(
-        "--trajectories", type=int, default=3,
+        "--trajectories",
+        type=int,
+        default=3,
         help="Number of evaluation episodes to save per checkpoint (0 disables recording)",
     )
     p.add_argument(
-        "--plots", action="store_true",
+        "--plots",
+        action="store_true",
         help="Render report PNGs after completing the experiment (requires matplotlib)",
     )
     p.add_argument("--goal-row", type=int, default=9)
@@ -73,7 +80,9 @@ def build_dataset(env: FourRooms, args: argparse.Namespace) -> tuple[Transition,
     if args.dataset == "oracle":
         return tuple(env.all_transitions())
     return collect_transitions(
-        env, count=args.transitions, seed=args.seed,
+        env,
+        count=args.transitions,
+        seed=args.seed,
         choose_action=lambda obs, rng: int(rng.integers(env.num_actions)),
     ).transitions
 
@@ -89,11 +98,17 @@ def save_dataset(path: Path, transitions: Sequence[Transition]) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
-def build_spec(args: argparse.Namespace, task: TaskSpec, *, count: int, fingerprint: str) -> ExperimentSpec:
+def build_spec(
+    args: argparse.Namespace, task: TaskSpec, *, count: int, fingerprint: str
+) -> ExperimentSpec:
     return ExperimentSpec(
         name="fb_four_rooms_diagnostic",
-        agent=ComponentSpec(name="discrete_fb", settings={"representation_dim": REPRESENTATION_DIM}),
-        environment=ComponentSpec(name="four_rooms", settings={"max_episode_steps": args.max_steps}),
+        agent=ComponentSpec(
+            name="discrete_fb", settings={"representation_dim": REPRESENTATION_DIM}
+        ),
+        environment=ComponentSpec(
+            name="four_rooms", settings={"max_episode_steps": args.max_steps}
+        ),
         dataset=ComponentSpec(
             name="fixed_grid_transitions",
             settings={"origin": args.dataset, "count": count, "sha256": fingerprint},
@@ -129,7 +144,9 @@ def main() -> None:
     args.output.mkdir(parents=True, exist_ok=True)
     fingerprint = save_dataset(args.output / "dataset.npz", transitions)
 
-    task = TaskSpec(task_id=f"reach_{goal[0]}_{goal[1]}", settings={"goal_row": goal[0], "goal_col": goal[1]})
+    task = TaskSpec(
+        task_id=f"reach_{goal[0]}_{goal[1]}", settings={"goal_row": goal[0], "goal_col": goal[1]}
+    )
     spec = build_spec(args, task, count=len(transitions), fingerprint=fingerprint)
     run_id = f"fb_four_rooms_seed_{args.seed}"
     provenance = {
@@ -141,16 +158,24 @@ def main() -> None:
         "dataset_sha256": fingerprint,
     }
     recorder = JsonlRunRecorder(args.output)
-    recorder.write_manifest(RunManifest(run_id=run_id, experiment=spec, status="running", provenance=provenance))
+    recorder.write_manifest(
+        RunManifest(run_id=run_id, experiment=spec, status="running", provenance=provenance)
+    )
 
     def evaluate(agent: DiscreteFBAgent, checkpoint_id: str, snapshot: str) -> EvaluationRecord:
         condition = agent.goal_condition(goal_observation)
         save_policy_snapshot(agent, eval_env, condition, args.output / snapshot)
         record = evaluate_goal_policy(
-            agent, eval_env, condition=condition,
+            agent,
+            eval_env,
+            condition=condition,
             is_goal=lambda obs: bool(np.array_equal(obs, goal_observation)),
-            episodes=args.episodes, max_steps=args.max_steps, run_id=run_id,
-            task_id=task.task_id, checkpoint_id=checkpoint_id, seed=args.seed + 100,
+            episodes=args.episodes,
+            max_steps=args.max_steps,
+            run_id=run_id,
+            task_id=task.task_id,
+            checkpoint_id=checkpoint_id,
+            seed=args.seed + 100,
             on_trajectory=recorder.write_trajectory if args.trajectories else None,
             max_trajectories=args.trajectories,
         )
@@ -160,18 +185,28 @@ def main() -> None:
     try:
         agent = DiscreteFBAgent(
             DiscreteFBConfig(
-                observation_dim=env.observation_dim, num_actions=env.num_actions,
-                representation_dim=REPRESENTATION_DIM, hidden_dim=HIDDEN_DIM, seed=args.seed,
+                observation_dim=env.observation_dim,
+                num_actions=env.num_actions,
+                representation_dim=REPRESENTATION_DIM,
+                hidden_dim=HIDDEN_DIM,
+                seed=args.seed,
             )
         )
         sampler = FBTransitionSampler(transitions, batch_size=args.batch_size, seed=args.seed + 2)
         initial = evaluate(agent, "initial_in_memory", "policy_initial.npz")
         training = train_updates(
-            agent, sampler, updates=args.updates, run_id=run_id,
-            recorder=recorder, log_every=max(1, args.updates // 10),
+            agent,
+            sampler,
+            updates=args.updates,
+            run_id=run_id,
+            recorder=recorder,
+            log_every=max(1, args.updates // 10),
         )
         # Trusted local-only torch checkpoint. Never torch.load an untrusted file.
-        torch.save({"agent": agent.state_dict(), "sampler": sampler.state_dict()}, args.output / "checkpoint.pt")
+        torch.save(
+            {"agent": agent.state_dict(), "sampler": sampler.state_dict()},
+            args.output / "checkpoint.pt",
+        )
         final = evaluate(agent, "checkpoint.pt", "policy_final.npz")
         artifacts = {
             "policy_initial": "policy_initial.npz",
@@ -182,15 +217,21 @@ def main() -> None:
         }
         recorder.write_manifest(
             RunManifest(
-                run_id=run_id, experiment=spec, status="completed", selected_checkpoint="checkpoint.pt",
+                run_id=run_id,
+                experiment=spec,
+                status="completed",
+                selected_checkpoint="checkpoint.pt",
                 provenance={**provenance, "diagnostic_artifacts": artifacts},
             )
         )
     except Exception as exc:
         recorder.write_manifest(
             RunManifest(
-                run_id=run_id, experiment=spec, status="failed",
-                error=f"{type(exc).__name__}: {exc}", provenance=provenance,
+                run_id=run_id,
+                experiment=spec,
+                status="failed",
+                error=f"{type(exc).__name__}: {exc}",
+                provenance=provenance,
             )
         )
         raise

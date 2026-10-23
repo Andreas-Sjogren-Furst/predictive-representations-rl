@@ -39,9 +39,17 @@ def test_recording_is_independent_of_storage_backend():
     recorder.write_manifest(RunManifest("run-01", spec, provenance={"git_commit": "test"}))
     loss = MetricValue("fb_loss", 0.1, "unitless", "instant")
     recorder.write_training_metrics(TrainingMetricRecord("run-01", "gradient_updates", 10, (loss,)))
-    recorder.write_evaluation(EvaluationRecord("run-01", "ckpt-1", "task-1", "zero_shot", 42, 2, (
-        MetricValue("success", 0.5, "fraction", "mean"),
-    )))
+    recorder.write_evaluation(
+        EvaluationRecord(
+            "run-01",
+            "ckpt-1",
+            "task-1",
+            "zero_shot",
+            42,
+            2,
+            (MetricValue("success", 0.5, "fraction", "mean"),),
+        )
+    )
     assert recorder.training[0].step_axis == "gradient_updates"
     assert recorder.evaluations[0].checkpoint_id == "ckpt-1"
     assert recorder.manifests["run-01"].experiment.to_dict()["seed"] == 42

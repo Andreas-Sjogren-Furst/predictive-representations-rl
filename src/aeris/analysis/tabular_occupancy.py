@@ -5,12 +5,15 @@ Uses the convention G(s,a,x) = E[sum_{t>=0} gamma**t 1{s_t=x}
 | s_0=s, a_0=a, a_{t>0}~pi(.|s_t)]. The t=0 term is the
 CURRENT state; the chosen first action affects terms t>=1.
 """
+
 from __future__ import annotations
 
 import numpy as np
 
 
-def exact_discounted_occupancy(next_states: np.ndarray, policy: np.ndarray, *, gamma: float) -> np.ndarray:
+def exact_discounted_occupancy(
+    next_states: np.ndarray, policy: np.ndarray, *, gamma: float
+) -> np.ndarray:
     """Return occupancies [state, first_action, visited_state].
 
     next_states: deterministic model [S,A]; policy: action probabilities [S,A].
@@ -22,7 +25,11 @@ def exact_discounted_occupancy(next_states: np.ndarray, policy: np.ndarray, *, g
     policy = np.asarray(policy, dtype=np.float64)
     if next_states.ndim != 2 or next_states.shape[0] == 0 or next_states.shape[1] < 2:
         raise ValueError("next_states must have shape [states, actions>=2]")
-    if next_states.dtype.kind not in 'iu' or np.any(next_states < 0) or np.any(next_states >= len(next_states)):
+    if (
+        next_states.dtype.kind not in "iu"
+        or np.any(next_states < 0)
+        or np.any(next_states >= len(next_states))
+    ):
         raise ValueError("invalid next-state indices")
     if policy.shape != next_states.shape or not np.isfinite(policy).all() or np.any(policy < 0):
         raise ValueError("policy must contain finite nonnegative action probabilities")

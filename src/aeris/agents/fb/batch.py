@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -24,15 +24,25 @@ class FBTransitionSampler:
     task sampling. Never infer goals from *evaluation* data implicitly.
     """
 
-    def __init__(self, transitions: Sequence[Transition], *, batch_size: int, seed: int = 0,
-                 goal_observations: Any | None = None):
+    def __init__(
+        self,
+        transitions: Sequence[Transition],
+        *,
+        batch_size: int,
+        seed: int = 0,
+        goal_observations: Any | None = None,
+    ):
         if len(transitions) == 0 or batch_size < 1:
             raise ValueError("need a nonempty transition source and positive batch_size")
         self.transitions = tuple(transitions)
         self.batch_size = batch_size
         self.rng = np.random.default_rng(seed)
-        self.goal_observations = None if goal_observations is None else np.asarray(goal_observations, dtype=np.float32)
-        if self.goal_observations is not None and (self.goal_observations.ndim != 2 or not len(self.goal_observations)):
+        self.goal_observations = (
+            None if goal_observations is None else np.asarray(goal_observations, dtype=np.float32)
+        )
+        if self.goal_observations is not None and (
+            self.goal_observations.ndim != 2 or not len(self.goal_observations)
+        ):
             raise ValueError("goal_observations must be a nonempty matrix")
 
     def next_batch(self) -> FBTrainingBatch:
@@ -47,8 +57,12 @@ class FBTransitionSampler:
         return FBTrainingBatch(
             observations=np.stack([np.asarray(t.observation, dtype=np.float32) for t in primary]),
             actions=np.asarray([t.action for t in primary], dtype=np.int64),
-            next_observations=np.stack([np.asarray(t.next_observation, dtype=np.float32) for t in primary]),
-            comparison_observations=np.stack([np.asarray(t.observation, dtype=np.float32) for t in others]),
+            next_observations=np.stack(
+                [np.asarray(t.next_observation, dtype=np.float32) for t in primary]
+            ),
+            comparison_observations=np.stack(
+                [np.asarray(t.observation, dtype=np.float32) for t in others]
+            ),
             goal_observations=goals,
         )
 

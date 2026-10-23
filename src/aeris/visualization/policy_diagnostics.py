@@ -25,7 +25,9 @@ def render_optimal_policy(oracle: FourRoomsOracle, output_file: str | Path) -> P
     for i, (row, col) in enumerate(oracle.positions):
         if i == oracle.goal_index:
             continue
-        symbols = "".join(ACTION_ARROWS[a] for a in np.flatnonzero(oracle.optimal.optimal_actions[i]))
+        symbols = "".join(
+            ACTION_ARROWS[a] for a in np.flatnonzero(oracle.optimal.optimal_actions[i])
+        )
         ax.text(col, row, symbols, ha="center", va="center", fontsize=8.5)
     ax.set_title("Exact optimal actions · all equally optimal actions shown")
     return save_figure(fig, output_file, dpi=150)
@@ -49,8 +51,14 @@ def render_policy_gap(
             continue
         color = OPTIMAL_COLOR if diagnostics.optimal_by_state[i] else SUBOPTIMAL_COLOR
         ax.text(
-            col, row, ACTION_ARROWS[int(actions[i])],
-            ha="center", va="center", fontsize=14, fontweight="bold", color=color,
+            col,
+            row,
+            ACTION_ARROWS[int(actions[i])],
+            ha="center",
+            va="center",
+            fontsize=14,
+            fontweight="bold",
+            color=color,
         )
     ax.set_title(
         f"{label} · optimal choices {diagnostics.optimal_action_fraction:.0%}"
@@ -58,13 +66,22 @@ def render_policy_gap(
     )
     legend = [
         Line2D([], [], marker="$✓$", linestyle="None", color=OPTIMAL_COLOR, label="Optimal choice"),
-        Line2D([], [], marker="$×$", linestyle="None", color=SUBOPTIMAL_COLOR, label="Suboptimal choice"),
+        Line2D(
+            [],
+            [],
+            marker="$×$",
+            linestyle="None",
+            color=SUBOPTIMAL_COLOR,
+            label="Suboptimal choice",
+        ),
     ]
     ax.legend(handles=legend, loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2)
     return save_figure(fig, output_file, dpi=150)
 
 
-def render_tabular_policy_figures(analysis: TabularPolicyAnalysis, output_dir: str | Path) -> tuple[Path, ...]:
+def render_tabular_policy_figures(
+    analysis: TabularPolicyAnalysis, output_dir: str | Path
+) -> tuple[Path, ...]:
     """Render the optimal policy and one policy-gap map per analyzed snapshot."""
     output = Path(output_dir)
     made = [render_optimal_policy(analysis.oracle, output / "optimal_policy.png")]

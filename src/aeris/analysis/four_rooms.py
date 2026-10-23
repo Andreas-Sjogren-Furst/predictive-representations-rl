@@ -90,7 +90,9 @@ class FourRoomsOracle:
         )
 
 
-def build_four_rooms_oracle(env: FourRooms, goal: Position, *, gamma: float = 0.99) -> FourRoomsOracle:
+def build_four_rooms_oracle(
+    env: FourRooms, goal: Position, *, gamma: float = 0.99
+) -> FourRoomsOracle:
     """Goal reward = 1 on ENTERING the goal; the goal then becomes terminal.
 
     This diagnostic reward is deliberately separate from the reward-free FB
@@ -102,26 +104,35 @@ def build_four_rooms_oracle(env: FourRooms, goal: Position, *, gamma: float = 0.
     index = {pos: i for i, pos in enumerate(env.positions)}
     goal_index = index[goal]
     next_states = np.asarray(
-        [[index[env.next_position(pos, a)] for a in range(env.num_actions)] for pos in env.positions],
+        [
+            [index[env.next_position(pos, a)] for a in range(env.num_actions)]
+            for pos in env.positions
+        ],
         dtype=np.int64,
     )
     rewards = (next_states == goal_index).astype(np.float64)
     rewards[goal_index] = 0.0
     done = np.zeros(len(env.positions), dtype=bool)
     done[goal_index] = True
-    distances = np.asarray([env.shortest_distance(pos, goal) for pos in env.positions], dtype=np.int64)
+    distances = np.asarray(
+        [env.shortest_distance(pos, goal) for pos in env.positions], dtype=np.int64
+    )
     optimal = value_iteration(next_states, rewards, done, gamma=gamma)
     return FourRoomsOracle(env.positions, goal, goal_index, next_states, distances, optimal)
 
 
-def save_policy_snapshot(agent: Agent, env: FourRooms, condition: Any, output_file: str | Path) -> Path:
+def save_policy_snapshot(
+    agent: Agent, env: FourRooms, condition: Any, output_file: str | Path
+) -> Path:
     """Record the deterministic action in every state, using only ``Agent.act``."""
     positions = np.asarray(env.positions, dtype=np.int64)
     actions = np.asarray(
         [
             agent.act(
                 ActionRequest(
-                    observation=env.observation_for(position), condition=condition, deterministic=True
+                    observation=env.observation_for(position),
+                    condition=condition,
+                    deterministic=True,
                 )
             ).action
             for position in env.positions
@@ -149,7 +160,7 @@ def load_policy_actions(
         raise ValueError("policy snapshot actions must be an integer vector [states]")
     if np.any((actions < 0) | (actions >= num_actions)):
         raise ValueError("policy snapshot contains invalid actions")
-    mapping = {(int(r), int(c)): int(a) for (r, c), a in zip(saved_positions, actions)}
+    mapping = {(int(r), int(c)): int(a) for (r, c), a in zip(saved_positions, actions, strict=True)}
     if len(mapping) != len(positions) or set(mapping) != set(positions):
         raise ValueError("policy snapshot states don't match the environment")
     return np.asarray([mapping[p] for p in positions], dtype=np.int64)
@@ -170,7 +181,9 @@ class TabularPolicyAnalysis:
     snapshots: dict[str, SnapshotDiagnostics]
 
 
-def analyze_saved_four_rooms_run(run_dir: str | Path, *, gamma: float = 0.99) -> TabularPolicyAnalysis:
+def analyze_saved_four_rooms_run(
+    run_dir: str | Path, *, gamma: float = 0.99
+) -> TabularPolicyAnalysis:
     """Compare saved policy snapshots with the exact optimal policy, without torch.
 
     The original experiment artifacts remain unchanged. The report is derived

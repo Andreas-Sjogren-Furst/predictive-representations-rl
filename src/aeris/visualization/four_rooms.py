@@ -16,25 +16,29 @@ from aeris.visualization._plotting import ACTION_ARROWS, draw_grid, pyplot, save
 TRAJECTORY_CHECKPOINTS = {"initial": "initial_in_memory", "final": "checkpoint.pt"}
 
 
-def render_policy_map(snapshot_file: str | Path, goal: tuple[int, int], output_file: str | Path) -> Path:
+def render_policy_map(
+    snapshot_file: str | Path, goal: tuple[int, int], output_file: str | Path
+) -> Path:
     """Plot deterministic per-state action choices, not optimal action values."""
     env = FourRooms()
     actions = load_policy_actions(snapshot_file, env.positions, num_actions=env.num_actions)
     fig, ax = pyplot().subplots(figsize=(6.4, 6.4))
     draw_grid(ax, env, goal)
-    for (r, c), action in zip(env.positions, actions):
+    for (r, c), action in zip(env.positions, actions, strict=True):
         if (r, c) != goal:
             ax.text(c, r, ACTION_ARROWS[int(action)], ha="center", va="center", fontsize=12)
     ax.set_title(f"Learned policy — {Path(snapshot_file).stem}")
     return save_figure(fig, output_file)
 
 
-def render_trajectory(trajectory: dict[str, Any], goal: tuple[int, int], output_file: str | Path) -> Path:
+def render_trajectory(
+    trajectory: dict[str, Any], goal: tuple[int, int], output_file: str | Path
+) -> Path:
     """Show the actual recorded action sequence; no simulated reconstruction."""
     env = FourRooms()
     coords = [env.position_of(trajectory["initial_observation"])]
     coords += [env.position_of(s["next_observation"]) for s in trajectory["steps"]]
-    rows, cols = zip(*coords)
+    rows, cols = zip(*coords, strict=True)
     fig, ax = pyplot().subplots(figsize=(6.4, 6.4))
     draw_grid(ax, env, goal)
     ax.plot(cols, rows, "o-", markersize=3, linewidth=1.5, label="Trajectory")
@@ -63,7 +67,7 @@ def render_training_metrics(metrics_file: str | Path, output_file: str | Path) -
             if m["name"] == name
         ]
         if pairs:
-            ax.plot(*zip(*pairs), label=name)
+            ax.plot(*zip(*pairs, strict=True), label=name)
             plotted += 1
     if not plotted:
         pyplot().close(fig)

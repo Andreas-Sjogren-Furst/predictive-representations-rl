@@ -3,9 +3,11 @@
 Usage: uv run --extra fb-torch python examples/discrete_fb_smoke.py
 This is a smoke test, NOT reproduction of published maze results.
 """
+
 from __future__ import annotations
 
 import numpy as np
+
 from aeris.agents.fb import DiscreteFBAgent, DiscreteFBConfig, FBTransitionSampler
 from aeris.domain.agent import ActionRequest
 from aeris.domain.experience import Transition
@@ -18,12 +20,24 @@ def main() -> None:
     dataset = []
     for state in range(n_states):
         for action, shift in enumerate((-1, 1)):
-            dataset.append(Transition(observation=eye[state], action=action,
-                                      next_observation=eye[(state + shift) % n_states]))
+            dataset.append(
+                Transition(
+                    observation=eye[state],
+                    action=action,
+                    next_observation=eye[(state + shift) % n_states],
+                )
+            )
     batch_source = FBTransitionSampler(dataset, batch_size=32, seed=17)
-    agent = DiscreteFBAgent(DiscreteFBConfig(observation_dim=n_states, num_actions=n_actions,
-                                             representation_dim=16, hidden_dim=64,
-                                             task_sampling="cauchy_ball", seed=17))
+    agent = DiscreteFBAgent(
+        DiscreteFBConfig(
+            observation_dim=n_states,
+            num_actions=n_actions,
+            representation_dim=16,
+            hidden_dim=64,
+            task_sampling="cauchy_ball",
+            seed=17,
+        )
+    )
     for _ in range(30):
         metrics = agent.update(batch_source.next_batch())
     goal = agent.goal_condition(eye[3])

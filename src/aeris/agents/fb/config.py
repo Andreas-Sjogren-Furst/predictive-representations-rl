@@ -3,6 +3,7 @@
 Defaults mirror Touati & Ollivier's published discrete-maze command where
 possible; dimensions and action count come from the selected environment.
 """
+
 from dataclasses import dataclass
 from typing import Literal
 
@@ -28,7 +29,11 @@ class DiscreteFBConfig:
     def __post_init__(self) -> None:
         for key in ("observation_dim", "num_actions", "representation_dim", "hidden_dim"):
             val = getattr(self, key)
-            if isinstance(val, bool) or not isinstance(val, int) or val < (2 if key == "num_actions" else 1):
+            if (
+                isinstance(val, bool)
+                or not isinstance(val, int)
+                or val < (2 if key == "num_actions" else 1)
+            ):
                 raise ValueError(f"{key} must be a positive integer (num_actions >= 2)")
         if not (0 <= self.gamma < 1):
             raise ValueError("gamma must be in [0, 1)")

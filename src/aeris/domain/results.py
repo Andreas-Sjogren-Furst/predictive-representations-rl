@@ -2,8 +2,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from .serialization import freeze_settings, to_json_data
 from .experiment import ExperimentSpec
+from .serialization import freeze_settings, to_json_data
 from .task import TaskEvidenceRef
 from .validation import require_finite_number, require_identifier, require_int
 

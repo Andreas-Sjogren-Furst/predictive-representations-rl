@@ -3,7 +3,9 @@
 Unlike ExperimentSpec, these records deliberately accept backend-native
 observations and actions; serialization belongs to the artifact adapter.
 """
+
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any
 
