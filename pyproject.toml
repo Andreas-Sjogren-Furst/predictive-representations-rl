@@ -1,32 +1,37 @@
 [project]
-name = "predictive-representations-rl"
+name = "aeris"
 version = "0.1.0"
-description = "Add your description here"
+description = "A modular research framework for reproducible experiments and analysis of learning agents in reinforcement learning."
 readme = "README.md"
 authors = [
-    { name = "Andreas-Sjogren-Furst", email = "91537952+Andreas-Sjogren-Furst@users.noreply.github.com" }
+    { name = "Andreas-Sjogren-Furst", email = "91537952+Andreas-Sjogren-Furst@users.noreply.github.com" },
 ]
-requires-python = ">=3.12"
-dependencies = [
-    "h5py>=3.16.0",
-    "matplotlib>=3.11.2",
-    "numpy>=2.5.3",
-    "pyyaml>=6.0.3",
-    "scikit-learn>=1.9.1",
-]
-
-[project.scripts]
-prl = "predictive_representations_rl.cli:main"
+requires-python = ">=3.11"
+dependencies = []
 
 [build-system]
-requires = ["uv_build>=0.12.17,<0.13.0"]
-build-backend = "uv_build"
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aeris"]
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
+    "pytest>=8,<10",
+]
+
+[project.optional-dependencies]
+fb-torch = [
+    "torch>=2.3,<3",
+    "numpy>=1.26,<3",
+]
+viz = [
+    "matplotlib>=3.9,<4"
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = ["third_party", ".venv", ".venvs", ".git"]
+norecursedirs = [".git", ".venv", "third_party", "runs"]
+pythonpath = ["."]
+
