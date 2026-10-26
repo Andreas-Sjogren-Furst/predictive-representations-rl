@@ -110,3 +110,18 @@ def test_transition_file_verifies_fingerprint_and_yields_transitions(tmp_path):
     assert first.action == transitions[0].action and first.reward is None
     with pytest.raises(ValueError, match="fingerprint"):
         TransitionFile(path, expected_sha256="0" * 64)
+
+
+def test_run_catalog_returns_typed_records(four_rooms_run, tmp_path):
+    from aeris.data import RunDetails, RunSummary, inspect_run, list_runs, resolve_run
+
+    run = four_rooms_run()
+    run.write_training_metrics(TrainingMetricRecord("run-42", "gradient_updates", 5, (METRIC,)))
+    (summary,) = list_runs(tmp_path)
+    assert isinstance(summary, RunSummary)
+    assert (summary.run_id, summary.status, summary.agent) == ("run-42", "completed", "discrete_fb")
+    details = inspect_run(resolve_run("run-42", root=tmp_path))
+    assert isinstance(details, RunDetails)
+    assert details.last_training_record.step == 5
+    assert details.recent_evaluations == ()
+    assert details.to_dict()["manifest"]["run_id"] == "run-42"

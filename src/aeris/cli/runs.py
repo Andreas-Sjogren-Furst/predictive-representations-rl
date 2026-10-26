@@ -10,15 +10,13 @@ import typer
 
 from aeris.cli._common import DEFAULT_ROOT, JsonOpt, RootOpt, RunArg, cli_errors
 from aeris.data.run_catalog import inspect_run, list_runs, resolve_run
+from aeris.domain.results import EvaluationRecord, TrainingMetricRecord
 
 app = typer.Typer(help="Browse and plot existing runs.", no_args_is_help=True)
 
 
-def _metrics(record: dict | None) -> str:
-    if not record:
-        return "none"
-    values = record.get("metrics", [])
-    return ", ".join(f"{v.get('name', '?')}={v.get('value', '?')}" for v in values) or "none"
+def _metrics(record: TrainingMetricRecord | EvaluationRecord) -> str:
+    return ", ".join(f"{m.name}={m.value}" for m in record.metrics) or "none"
 
 
 @app.command("list")
@@ -30,17 +28,14 @@ def list_command(
     with cli_errors():
         records = list_runs(root)
     if as_json:
-        typer.echo(json.dumps(records, indent=2))
+        typer.echo(json.dumps([record.to_dict() for record in records], indent=2))
         return
     if not records:
         typer.echo(f"No saved runs found in {root}")
         return
     typer.echo(f"{'STATUS':<12} {'RUN ID':<30} {'AGENT':<16} DIRECTORY")
     for record in records:
-        typer.echo(
-            f"{str(record['status']):<12} {record['run_id']:<30} "
-            f"{record['agent']:<16} {record['directory']}"
-        )
+        typer.echo(f"{record.status:<12} {record.run_id:<30} {record.agent:<16} {record.directory}")
 
 
 @app.command("show")
@@ -53,35 +48,27 @@ def show_command(
     with cli_errors():
         details = inspect_run(resolve_run(run, root=root))
     if as_json:
-        typer.echo(json.dumps(details, indent=2))
+        typer.echo(json.dumps(details.to_dict(), indent=2))
         return
-    manifest = details["manifest"]
-    exp = manifest["experiment"]
-    typer.echo(f"Run:        {details['run_id']}")
-    typer.echo(f"Directory:  {details['directory']}")
-    typer.echo(f"Status:     {details['status']}")
-    typer.echo(f"Experiment: {details['experiment']}")
-    typer.echo(f"Agent:      {details['agent']}")
-    typer.echo(f"Seed:       {details['seed']}")
-    dataset = exp.get("dataset")
-    typer.echo(
-        f"Dataset:    {dataset.get('name', 'unknown') if isinstance(dataset, dict) else 'none'}"
-    )
-    typer.echo(f"Checkpoint: {manifest.get('selected_checkpoint') or 'none'}")
-    typer.echo(f"Training records: {details['training_record_count']}")
-    last = details["last_training_record"]
-    if last:
-        typer.echo(
-            f"  Last {last.get('step_axis', 'step')} {last.get('step', '?')}: {_metrics(last)}"
-        )
-    typer.echo(f"Evaluation records: {details['evaluation_record_count']}")
-    for record in details["recent_evaluations"]:
-        typer.echo(
-            f"  {record.get('checkpoint_id', '?')} / {record.get('task_id', '?')}: "
-            f"{_metrics(record)}"
-        )
-    if manifest.get("error"):
-        typer.echo(f"Error: {manifest['error']}")
+    manifest = details.manifest
+    dataset = manifest.experiment.dataset
+    typer.echo(f"Run:        {details.run_id}")
+    typer.echo(f"Directory:  {details.directory}")
+    typer.echo(f"Status:     {details.status}")
+    typer.echo(f"Experiment: {details.experiment}")
+    typer.echo(f"Agent:      {details.agent}")
+    typer.echo(f"Seed:       {details.seed}")
+    typer.echo(f"Dataset:    {dataset.name if dataset is not None else 'none'}")
+    typer.echo(f"Checkpoint: {manifest.selected_checkpoint or 'none'}")
+    typer.echo(f"Training records: {details.training_record_count}")
+    last = details.last_training_record
+    if last is not None:
+        typer.echo(f"  Last {last.step_axis} {last.step}: {_metrics(last)}")
+    typer.echo(f"Evaluation records: {details.evaluation_record_count}")
+    for record in details.recent_evaluations:
+        typer.echo(f"  {record.checkpoint_id} / {record.task_id}: {_metrics(record)}")
+    if manifest.error:
+        typer.echo(f"Error: {manifest.error}")
 
 
 @app.command("plot")

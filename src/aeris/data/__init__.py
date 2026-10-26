@@ -7,11 +7,13 @@ from .artifacts import (
     write_policy_snapshot_npz,
     write_transitions_npz,
 )
-from .run_catalog import inspect_run, list_runs, resolve_run
+from .run_catalog import RunDetails, RunSummary, inspect_run, list_runs, resolve_run
 from .run_directory import RunDirectory
 
 __all__ = [
+    "RunDetails",
     "RunDirectory",
+    "RunSummary",
     "TransitionFile",
     "file_sha256",
     "inspect_run",
