@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from aeris.analysis.goal_policy import build_goal_oracle
@@ -121,6 +122,49 @@ def test_analysis_calls_existing_saved_run_implementation(tmp_path):
     report = json.loads(report_file.read_text(encoding="utf8"))
     assert report["run_id"] == "run-42"
     assert report["snapshots"]["final"]["optimal_action_fraction"] == 1.0
+
+
+def test_analysis_accepts_a_run_id_under_root(tmp_path):
+    run = _run(tmp_path / "some_folder", identifier="seed-7")
+    oracle = build_goal_oracle(FourRooms().tabular_dynamics(), (9, 9), gamma=0.99)
+    run.write_policy_snapshot(
+        "final", PolicySnapshot(states=oracle.states, actions=oracle.optimal_policy())
+    )
+    result = runner.invoke(
+        app, ["analysis", "four-rooms", "seed-7", "--root", str(tmp_path), "--no-plots"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Analyzed run: seed-7" in result.output
+
+
+def test_plot_renders_recorded_artifacts(tmp_path):
+    pytest.importorskip("matplotlib")
+    run = _run(tmp_path / "run")
+    result = runner.invoke(app, ["runs", "plot", str(run.root)])
+    assert result.exit_code == 0, result.output
+    assert "training.png" in result.output
+    assert "success_rate.png" in result.output
+    assert (run.figures_dir / "training.png").is_file()
+
+
+def test_missing_optional_dependency_names_the_extra(tmp_path, monkeypatch):
+    import aeris.workflows.four_rooms as workflows
+
+    def needs_torch(_run):
+        raise ModuleNotFoundError("No module named 'torch'", name="torch")
+
+    monkeypatch.setattr(workflows, "diagnose_fb_checkpoint", needs_torch)
+    result = runner.invoke(app, ["analysis", "fb-checkpoint", str(_run(tmp_path / "run").root)])
+    assert result.exit_code == 1
+    assert "uv sync --extra fb-torch" in result.output
+
+
+def test_fb_checkpoint_refuses_runs_without_an_oracle_dataset(tmp_path):
+    pytest.importorskip("torch")
+    run = write_four_rooms_run(tmp_path / "run", dataset_settings={"origin": "random"})
+    result = runner.invoke(app, ["analysis", "fb-checkpoint", str(run.root), "--no-plots"])
+    assert result.exit_code == 1
+    assert "oracle dataset" in result.output
 
 
 def test_analysis_invalid_environment_exits_cleanly(tmp_path):

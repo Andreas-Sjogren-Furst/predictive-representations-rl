@@ -51,6 +51,8 @@ def open_four_rooms_run(run: RunRef) -> FourRoomsRun:
         raise ValueError("only Four Rooms runs are supported")
     if experiment.evaluation is None or len(experiment.evaluation.targets) != 1:
         raise ValueError("exactly one evaluation target is required")
+    if "max_steps" not in experiment.evaluation.protocol.settings:
+        raise ValueError("the evaluation protocol does not record max_steps")
     env = FourRooms()
     task = experiment.evaluation.targets[0].task
     return FourRoomsRun(

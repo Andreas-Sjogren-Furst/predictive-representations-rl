@@ -2,7 +2,7 @@
 
 Run: uv run --extra fb-torch python examples/fb_four_rooms.py --updates 250
 Outputs in runs/fb_four_rooms/, or a user-selected --output directory.
-Inspect the run afterwards with examples/four_rooms_report.py.
+Inspect the run afterwards with the `aeris` CLI (`aeris runs show`, `aeris analysis ...`).
 """
 
 from __future__ import annotations

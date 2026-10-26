@@ -31,13 +31,13 @@ A full-coverage, uniformly weighted set of start states is **not** the same dist
 From the AERIS repository root, after installing the existing `fb-torch` and `viz` extras:
 
 ```bash
-uv run --extra viz python examples/four_rooms_report.py analyze runs/fb_four_rooms_visual
+uv run --extra viz aeris analysis four-rooms runs/fb_four_rooms_visual
 ```
 
 No Matplotlib required for numeric analysis:
 
 ```bash
-uv run python examples/four_rooms_report.py analyze runs/fb_four_rooms_visual --no-plots
+uv run aeris analysis four-rooms runs/fb_four_rooms_visual --no-plots
 ```
 
 `--gamma 0.99` is the default. Supply another value strictly between 0 and 1 if desired (0 is also mathematically supported).

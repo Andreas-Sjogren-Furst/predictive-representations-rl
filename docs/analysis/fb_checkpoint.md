@@ -48,13 +48,13 @@ Finally, use the existing exact first-hit/terminal-goal analysis on the greedy p
 ## Usage
 
 ```bash
-uv run --extra fb-torch python examples/four_rooms_report.py diagnose runs/fb_four_rooms_visual
-uv run --extra fb-torch --extra viz python examples/four_rooms_report.py diagnose runs/fb_four_rooms_visual --plots
+uv run --extra fb-torch aeris analysis fb-checkpoint runs/fb_four_rooms_visual --no-plots
+uv run --extra fb-torch --extra viz aeris analysis fb-checkpoint runs/fb_four_rooms_visual
 ```
 
 Outputs are new *derived* artifacts (the original run is not overwritten):
 
 - `analysis/fb_checkpoint_v1.json`
-- `figures/fb_action_alignment.png` (only with `--plots`)
+- `figures/fb_action_alignment.png` (unless `--no-plots`)
 
 The figure marks state-action ranking agreement for **exact target-policy improvement**, not globally optimal goal-reaching actions. For the latter use the existing `policy_gap_final.png` plot.

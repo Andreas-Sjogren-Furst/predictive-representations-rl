@@ -1,4 +1,4 @@
-"""End-to-end run of the Four Rooms example and report CLI."""
+"""End-to-end: train with the Four Rooms example, then inspect the run with the aeris CLI."""
 
 import json
 import subprocess
@@ -46,14 +46,15 @@ def test_train_then_report(tmp_path):
     ):
         assert (out / name).is_file(), name
 
-    report = EXAMPLES / "four_rooms_report.py"
-    run(report, "analyze", out, "--no-plots")
-    run(report, "diagnose", out)
+    aeris = ["-m", "aeris.cli.main"]  # run() prepends the interpreter
+    run(*aeris, "analysis", "four-rooms", out, "--no-plots")
+    diagnosis = run(*aeris, "analysis", "fb-checkpoint", out, "--no-plots").stdout
+    assert "warning" not in diagnosis  # the saved final snapshot matches the checkpoint
     assert (out / "analysis" / "tabular_policy_v1.json").is_file()
     assert (out / "analysis" / "fb_checkpoint_v1.json").is_file()
 
     pytest.importorskip("matplotlib")
-    rendered = run(report, "render", out).stdout.split()
+    rendered = run(*aeris, "runs", "plot", out).stdout.split()
     assert {Path(p).name for p in rendered} >= {
         "training.png",
         "policy_final.png",

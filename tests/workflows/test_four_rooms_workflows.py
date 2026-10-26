@@ -1,7 +1,3 @@
-import subprocess
-import sys
-from pathlib import Path
-
 import pytest
 
 from aeris.analysis.goal_policy import build_goal_oracle
@@ -15,8 +11,6 @@ from aeris.workflows.four_rooms import (
     render_policy_figures,
     render_run_figures,
 )
-
-EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
 
 def with_optimal_snapshot(run):
@@ -73,23 +67,6 @@ def test_policy_figures(four_rooms_run):
     made = render_policy_figures(run, analyze_saved_policies(run))
     assert [p.name for p in made] == ["optimal_policy.png", "policy_gap_final.png"]
     assert [p.name for p in render_run_figures(run)] == ["policy_final.png"]
-
-
-def test_cli_script_analyzes_saved_run(four_rooms_run):
-    run = with_optimal_snapshot(four_rooms_run())
-    completed = subprocess.run(
-        [
-            sys.executable,
-            str(EXAMPLES / "four_rooms_report.py"),
-            "analyze",
-            str(run.root),
-            "--no-plots",
-        ],
-        check=True,
-        text=True,
-        capture_output=True,
-    )
-    assert "final:" in completed.stdout and "tabular_policy_v1.json" in completed.stdout
 
 
 class TestFBCheckpoint:

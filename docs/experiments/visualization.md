@@ -37,7 +37,7 @@ uv run --extra fb-torch --extra viz python examples/fb_four_rooms.py \
 To regenerate PNGs from a completed run without retraining:
 
 ```bash
-uv run --extra viz python examples/four_rooms_report.py render runs/fb_four_rooms_visual
+uv run --extra viz aeris runs plot runs/fb_four_rooms_visual
 ```
 
 The report saves `figures/training.png`, `figures/success_rate.png`, `figures/policy_initial.png`,

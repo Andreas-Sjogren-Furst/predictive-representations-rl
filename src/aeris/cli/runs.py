@@ -8,14 +8,10 @@ from typing import Annotated
 
 import typer
 
+from aeris.cli._common import DEFAULT_ROOT, JsonOpt, RootOpt, RunArg, cli_errors
 from aeris.data.run_catalog import inspect_run, list_runs, resolve_run
 
-app = typer.Typer(help="Browse existing run artifacts.", no_args_is_help=True)
-
-
-def _fail(exc: Exception) -> None:
-    typer.echo(f"Error: {exc}", err=True)
-    raise typer.Exit(code=1)
+app = typer.Typer(help="Browse and plot existing runs.", no_args_is_help=True)
 
 
 def _metrics(record: dict | None) -> str:
@@ -27,14 +23,12 @@ def _metrics(record: dict | None) -> str:
 
 @app.command("list")
 def list_command(
-    root: Annotated[Path, typer.Option("--root", "-r", help="Runs directory.")] = Path("runs"),
-    as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
+    root: Annotated[Path, typer.Option("--root", "-r", help="Runs directory.")] = DEFAULT_ROOT,
+    as_json: JsonOpt = False,
 ) -> None:
     """List immediate run directories containing manifest.json."""
-    try:
+    with cli_errors():
         records = list_runs(root)
-    except (OSError, ValueError) as exc:
-        _fail(exc)
     if as_json:
         typer.echo(json.dumps(records, indent=2))
         return
@@ -51,17 +45,13 @@ def list_command(
 
 @app.command("show")
 def show_command(
-    run: Annotated[str, typer.Argument(help="Run directory, folder name, or unique run_id.")],
-    root: Annotated[Path, typer.Option("--root", "-r", help="Runs directory for lookup.")] = Path(
-        "runs"
-    ),
-    as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
+    run: RunArg,
+    root: RootOpt = DEFAULT_ROOT,
+    as_json: JsonOpt = False,
 ) -> None:
     """Show manifest information and the most recent recorded metrics."""
-    try:
+    with cli_errors():
         details = inspect_run(resolve_run(run, root=root))
-    except (OSError, ValueError) as exc:
-        _fail(exc)
     if as_json:
         typer.echo(json.dumps(details, indent=2))
         return
@@ -92,3 +82,16 @@ def show_command(
         )
     if manifest.get("error"):
         typer.echo(f"Error: {manifest['error']}")
+
+
+@app.command("plot")
+def plot_command(run: RunArg, root: RootOpt = DEFAULT_ROOT) -> None:
+    """Plot a Four Rooms run's recorded artifacts into its figures/ folder (needs 'viz')."""
+    from aeris.workflows.four_rooms import render_run_figures
+
+    with cli_errors():
+        made = render_run_figures(resolve_run(run, root=root))
+    if not made:
+        typer.echo("Nothing to plot: the run has no recorded metrics, snapshots or trajectories")
+    for path in made:
+        typer.echo(f"Figure: {path}")

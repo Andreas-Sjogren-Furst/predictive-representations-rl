@@ -31,12 +31,15 @@ uv run python examples/fb_four_rooms.py --updates 250 --output runs/fb_four_room
 Inspect the completed run without retraining:
 
 ```bash
-uv run python examples/four_rooms_report.py render   runs/fb_four_rooms  # figures/*.png
-uv run python examples/four_rooms_report.py analyze  runs/fb_four_rooms  # exact tabular policy analysis
-uv run python examples/four_rooms_report.py diagnose runs/fb_four_rooms  # FB checkpoint vs exact occupancies
+uv run aeris runs list                                  # every run under runs/
+uv run aeris runs show fb_four_rooms                    # manifest and latest metrics
+uv run aeris runs plot fb_four_rooms                    # figures/*.png from recorded artifacts
+uv run aeris analysis four-rooms fb_four_rooms          # saved policies vs the exact optimal policy
+uv run aeris analysis fb-checkpoint fb_four_rooms       # FB checkpoint vs exact occupancies
 ```
 
-Each command writes derived artifacts (`analysis/*.json`, `figures/*.png`) next to the original
+A run can be named by its directory, its folder name under `runs/` (`--root` to change), or its
+unique `run_id`. Each command writes derived artifacts (`analysis/*.json`, `figures/*.png`) next to the original
 run and never changes it. `examples/discrete_fb_smoke.py` is a minimal training example without
 an environment.
 
