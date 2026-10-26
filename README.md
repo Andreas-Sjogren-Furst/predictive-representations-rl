@@ -19,6 +19,7 @@ The core package needs only NumPy. Optional extras:
 |---|---|---|
 | `fb-torch` | PyTorch | training and loading FB agents |
 | `viz` | Matplotlib | rendering figures |
+| `dashboard` | Streamlit, Plotly | the interactive run dashboard (`aeris dashboard`) |
 
 ## Quick start
 
@@ -37,6 +38,7 @@ uv run aeris runs plot fb_four_rooms                    # figures/*.png from rec
 uv run aeris analysis four-rooms fb_four_rooms          # saved policies vs the exact optimal policy
 uv run aeris analysis fb-checkpoint fb_four_rooms       # FB checkpoint vs exact occupancies
 uv run aeris analysis zero-shot fb_four_rooms           # infer every goal task from reward evidence
+uv run aeris dashboard                                  # browse and compare runs interactively
 ```
 
 A run can be named by its directory, its folder name under `runs/` (`--root` to change), or its
@@ -58,6 +60,7 @@ src/aeris/
   analysis/        Exact tabular baselines and run/checkpoint diagnostics (no file I/O, no plotting)
   workflows/       Open a run, check eligibility, run analyses, save reports, render figures
   cli/             The `aeris` command (Typer): browse runs and run workflows
+  dashboard/       Streamlit run dashboard: framework-free panels, saved layouts, a thin app shell
   visualization/   Optional Matplotlib figures from saved artifacts
 ```
 
@@ -80,6 +83,7 @@ that a component really satisfies one.
 
 ## Documentation
 
+- [Run dashboard](docs/dashboard.md): viewing, comparing and laying out runs; adding panels
 - [Architecture overview](docs/architecture/overview.md): layers, dependency rules, where validation lives, extending AERIS
 - [Domain models](docs/architecture/domain_models.md), [component contracts](docs/architecture/component_contracts.md), and the founding [experiment lifecycle](docs/architecture/experiment_lifecycle.md) specification
 - [Discrete FB algorithm](docs/algorithms/discrete_fb.md)

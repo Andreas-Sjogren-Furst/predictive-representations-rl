@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from aeris.cli import analysis, runs, train
+from aeris.cli import analysis, dashboard, runs, train
 
 app = typer.Typer(
     name="aeris",
@@ -14,6 +14,7 @@ app = typer.Typer(
 app.add_typer(train.app, name="train")
 app.add_typer(runs.app, name="runs")
 app.add_typer(analysis.app, name="analysis")
+app.command("dashboard")(dashboard.dashboard)
 
 
 if __name__ == "__main__":

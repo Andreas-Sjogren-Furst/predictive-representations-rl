@@ -23,11 +23,12 @@ data and interfaces are in [domain models](domain_models.md) and
 | `analysis/` | Pure functions: validated models and typed records in, typed reports out | `domain`, `contracts`, `agents`, `environments` |
 | `visualization/` | Matplotlib figures from typed records and analysis results | `domain`, `contracts`, `agents`, `environments`, `analysis` |
 | `workflows/` | End-to-end procedures: open a run, check eligibility, read artifacts, call analyses, save reports, render | everything except `cli` |
-| `cli/` | The `aeris` command: argument parsing and output only | `domain`, `data`, `workflows` |
+| `dashboard/` | Read-only Streamlit dashboard: panels turn `RunData` into Plotly figures and tables; only `app.py` imports Streamlit (see [dashboard](../dashboard.md)) | `domain`, `contracts`, `agents`, `environments`, `analysis`, `data` |
+| `cli/` | The `aeris` command: argument parsing and output only | `domain`, `data`, `workflows`, `dashboard` |
 
 ```text
 cli
-workflows
+workflows     dashboard
 analysis      visualization
 agents        environments      data      experiments
 contracts

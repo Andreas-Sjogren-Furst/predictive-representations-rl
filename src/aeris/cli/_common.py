@@ -22,7 +22,12 @@ JsonOpt = Annotated[bool, typer.Option("--json", help="Emit machine-readable JSO
 DEFAULT_ROOT = Path("runs")
 
 # Optional dependencies and the extra that provides them.
-_EXTRAS = {"torch": "fb-torch", "matplotlib": "viz"}
+_EXTRAS = {
+    "torch": "fb-torch",
+    "matplotlib": "viz",
+    "streamlit": "dashboard",
+    "plotly": "dashboard",
+}
 
 
 @contextmanager

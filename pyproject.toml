@@ -36,6 +36,10 @@ fb-torch = [
 viz = [
     "matplotlib>=3.9,<4",
 ]
+dashboard = [
+    "streamlit>=1.40,<2",
+    "plotly>=5.24,<7",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -46,6 +50,10 @@ files = ["src", "examples"]
 check_untyped_defs = true
 warn_unused_ignores = true
 warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["plotly.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100

@@ -14,7 +14,9 @@ ALLOWED = {
     "analysis": {"domain", "contracts", "agents", "environments"},
     "visualization": {"domain", "contracts", "agents", "environments", "analysis"},
     "workflows": {"domain", "contracts", "analysis", "visualization", *COMPONENTS},
-    "cli": {"domain", "data", "workflows"},
+    # Read-only views of saved runs: typed records, models for maps, no workflows.
+    "dashboard": {"domain", "contracts", "agents", "environments", "analysis", "data"},
+    "cli": {"domain", "data", "workflows", "dashboard"},
 }
 
 
@@ -58,6 +60,9 @@ def test_optional_dependencies_stay_where_they_belong():
             package == "agents" or path.name in {"four_rooms_training.py", "_runtime.py"}
         ),
         "matplotlib": lambda package, path: package == "visualization",
+        # Panels stay framework-free: only the shell may import Streamlit.
+        "streamlit": lambda package, path: package == "dashboard" and path.name == "app.py",
+        "plotly": lambda package, path: package == "dashboard",
     }
     violations = [
         f"{path.relative_to(SRC)} imports {module}"

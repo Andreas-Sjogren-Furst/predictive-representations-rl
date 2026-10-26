@@ -25,8 +25,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
-      - name: Install the project, dev tools and the viz extra from uv.lock
-        run: uv sync --locked --extra viz
+      - name: Install the project, dev tools and the viz and dashboard extras from uv.lock
+        run: uv sync --locked --extra viz --extra dashboard
 
       # The fb-torch extra resolves to the multi-GB CUDA build; CI only needs CPU torch.
       - name: Install CPU-only PyTorch
