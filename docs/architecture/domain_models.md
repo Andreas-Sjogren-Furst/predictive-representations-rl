@@ -22,6 +22,19 @@ This iteration distinguishes two categories:
 | `domain/experience.py` | `Transition` | Do not conflate `terminated`, `truncated`, and missing flags; reward may be missing in reward-free data |
 | `domain/task.py` | `TaskSpec`, `TaskEvidenceRef` | Task identity, permitted inference evidence, and model-specific condition are different things |
 | `domain/results.py` | `RunManifest`, `EvaluationRecord`, `MetricValue` | Results identify run, checkpoint, task, protocol, seed, evidence and metric semantics |
+| `domain/trajectory.py` | `EvaluationTrajectory`, `TrajectoryStep` | Observational episode traces; never task-inference evidence |
+| `domain/spaces.py` | `SpaceSpec`, `ObservationSpec`, `DiscreteActionSpec` | Components declare what they emit/expect; compatibility is checked by comparing specs, not ad-hoc dimensions |
+| `domain/artifacts.py` | `PolicySnapshot` | Derived artifacts are typed; states are matched by identity, never by index order |
+| `domain/reports.py` | `AnalysisReport`, `TabularPolicyReport`, `PolicySummary` | Analyses return typed reports; each report names its artifact file. Algorithm-specific reports live with the algorithm (e.g. `agents/fb/reports.py`) |
+
+### Reading records back
+
+Records that are saved as JSON (`RunManifest`, `ExperimentSpec`, `EvaluationRecord`,
+`TrainingMetricRecord`, `EvaluationTrajectory`, `SpaceSpec`, `PolicySnapshot`, reports) share the
+`JsonRecord` mixin: `to_dict()` writes plain JSON data and `from_dict()` rebuilds the typed record.
+`from_dict()` checks the data against the type hints, rejects unknown or missing fields with the
+offending path (for example `RunManifest.experiment.seed`), and then runs the record's own
+validation. Consumers therefore receive valid objects and do not re-validate raw dictionaries.
 
 ### ExperimentSpec
 

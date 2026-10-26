@@ -53,3 +53,57 @@ def test_recording_is_independent_of_storage_backend():
     assert recorder.training[0].step_axis == "gradient_updates"
     assert recorder.evaluations[0].checkpoint_id == "ckpt-1"
     assert recorder.manifests["run-01"].experiment.to_dict()["seed"] == 42
+
+
+class MemoryRun(MemoryRecorder):
+    """One in-memory run that is recorded, read back and annotated with artifacts."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.trajectories = []
+        self.snapshots = {}
+        self.reports = {}
+
+    def write_trajectory(self, record):
+        self.trajectories.append(record)
+
+    def read_manifest(self):
+        (manifest,) = self.manifests.values()
+        return manifest
+
+    def read_training_metrics(self):
+        return iter(self.training)
+
+    def read_evaluations(self):
+        return iter(self.evaluations)
+
+    def read_trajectories(self):
+        return iter(self.trajectories)
+
+    def write_policy_snapshot(self, label, snapshot):
+        self.snapshots[label] = snapshot
+
+    def read_policy_snapshot(self, label):
+        return self.snapshots.get(label)
+
+    def write_report(self, report):
+        self.reports[type(report).ARTIFACT_NAME] = report
+
+    def read_report(self, report_type):
+        return self.reports.get(report_type.ARTIFACT_NAME)
+
+
+def test_reading_and_artifacts_are_separate_capabilities():
+    from aeris.contracts import ArtifactStore, RunReader, TrajectoryRecorder
+    from aeris.domain import PolicySnapshot, TabularPolicyReport
+
+    run = MemoryRun()
+    assert isinstance(run, RunReader)
+    assert isinstance(run, ArtifactStore)
+    assert isinstance(run, TrajectoryRecorder)
+    assert not isinstance(MemoryRecorder(), RunReader)
+    snapshot = PolicySnapshot(states=[(1, 1)], actions=[0])
+    run.write_policy_snapshot("final", snapshot)
+    assert run.read_policy_snapshot("final") == snapshot
+    assert run.read_policy_snapshot("initial") is None
+    assert run.read_report(TabularPolicyReport) is None

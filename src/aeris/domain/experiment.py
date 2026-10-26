@@ -1,8 +1,8 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
-from .serialization import freeze_settings, to_json_data
+from .serialization import JsonRecord, freeze_settings
 from .task import TaskEvidenceRef, TaskSpec
 from .validation import require_identifier, require_int
 
@@ -25,7 +25,7 @@ class TrainingPlan:
     strategy: ComponentSpec | None = None
 
     def __post_init__(self) -> None:
-        if self.mode not in ("offline", "online", "hybrid", "none"):
+        if self.mode not in get_args(TrainingMode):
             raise ValueError(f"unknown training mode: {self.mode!r}")
         if (self.mode == "none") != (self.strategy is None):
             raise ValueError("training strategy is required unless mode='none'")
@@ -52,7 +52,7 @@ class EvaluationPlan:
 
 
 @dataclass(frozen=True, slots=True)
-class ExperimentSpec:
+class ExperimentSpec(JsonRecord):
     name: str
     agent: ComponentSpec
     training: TrainingPlan
@@ -79,6 +79,3 @@ class ExperimentSpec:
             raise ValueError("evaluation-only experiments require an evaluation plan")
         if self.initial_checkpoint is not None:
             require_identifier("initial_checkpoint", self.initial_checkpoint)
-
-    def to_dict(self) -> dict[str, Any]:
-        return to_json_data(self)

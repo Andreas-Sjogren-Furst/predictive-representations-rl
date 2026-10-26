@@ -28,6 +28,9 @@ The contracts use `typing.Protocol` for structural compatibility. The runtime `i
 | `contracts/dataset.py` | `TransitionSource` | Read one-step recorded experience lazily | Choosing training batches or neural-network encodings |
 | | `BatchProvider[BatchT]` | Construct next strategy-specific batch | Changing the learner or the raw dataset |
 | `contracts/recorder.py` | `RunRecorder` | Record manifest, training metrics, evaluation | Deciding experiment configuration or scientific comparability |
+| | `TrajectoryRecorder` | Record diagnostic evaluation episodes | Selecting which episodes to keep |
+| | `RunReader` | Return the recorded manifest, metrics, evaluations and trajectories as typed records | Interpreting results or checking analysis eligibility |
+| | `ArtifactStore` | Save/load derived policy snapshots and analysis reports | Computing those artifacts |
 
 All these capabilities are grouped by component; there is **no universal do-everything agent**. `TrainableAgent` includes `Agent`, while `TaskConditioner` and `Checkpointable` are independent optional capabilities. No algorithm-name branching exists in these definitions.
 
@@ -75,7 +78,7 @@ Tests verify discrete/simple vector observations, toy reward-free environment st
 
 ## Deferred design choices (intentionally unresolved)
 
-1. **Compatibility/SpaceSpec:** Determine a backend-independent way to describe observation/action modalities, shapes, and bounds, then check them at resolution time, before costly training. First mock runner should exercise one compatible and one incompatible combination.
+1. **Compatibility/SpaceSpec:** *First pass added in `domain/spaces.py` (flat observations, discrete actions); not yet wired into environments and agents.* Determine a backend-independent way to describe observation/action modalities, shapes, and bounds, then check them at resolution time, before costly training. First mock runner should exercise one compatible and one incompatible combination.
 2. **Task inference evidence:** A resolved evidence view (reward-labeled samples, demonstrations, or something else) must be permission-scoped, with explicit provenance; `TaskConditioner` alone cannot prevent evaluation leakage.
 3. **Recorder artifacts:** Add indexed trajectories/representations/videos and full error and checkpoint metadata only with a real storage implementation.
 4. **Training workflow:** How to select and instantiate `BatchProvider` and update cadence lives in a training strategy, not `Agent` or `Environment`.

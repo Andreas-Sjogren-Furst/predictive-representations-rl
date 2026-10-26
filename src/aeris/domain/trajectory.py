@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .serialization import JsonRecord
+
 
 @dataclass(frozen=True, slots=True)
 class TrajectoryStep:
@@ -22,7 +24,7 @@ class TrajectoryStep:
 
 
 @dataclass(frozen=True, slots=True)
-class EvaluationTrajectory:
+class EvaluationTrajectory(JsonRecord):
     run_id: str
     task_id: str
     checkpoint_id: str

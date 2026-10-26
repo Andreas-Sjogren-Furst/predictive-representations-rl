@@ -1,9 +1,9 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from .experiment import ExperimentSpec
-from .serialization import freeze_settings, to_json_data
+from .serialization import JsonRecord, freeze_settings
 from .task import TaskEvidenceRef
 from .validation import require_finite_number, require_identifier, require_int
 
@@ -11,7 +11,7 @@ RunStatus = Literal["created", "running", "completed", "failed", "interrupted"]
 
 
 @dataclass(frozen=True, slots=True)
-class RunManifest:
+class RunManifest(JsonRecord):
     run_id: str
     experiment: ExperimentSpec
     status: RunStatus = "created"
@@ -21,12 +21,9 @@ class RunManifest:
 
     def __post_init__(self) -> None:
         require_identifier("run_id", self.run_id)
-        if self.status not in ("created", "running", "completed", "failed", "interrupted"):
+        if self.status not in get_args(RunStatus):
             raise ValueError(f"unknown run status: {self.status!r}")
         object.__setattr__(self, "provenance", freeze_settings(self.provenance))
-
-    def to_dict(self) -> dict[str, Any]:
-        return to_json_data(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,12 +37,11 @@ class MetricValue:
         require_identifier("metric name", self.name)
         require_identifier("metric unit", self.unit)
         require_identifier("metric aggregation", self.aggregation)
-
         require_finite_number("metric value", self.value)
 
 
 @dataclass(frozen=True, slots=True)
-class EvaluationRecord:
+class EvaluationRecord(JsonRecord):
     run_id: str
     checkpoint_id: str
     task_id: str
@@ -65,12 +61,9 @@ class EvaluationRecord:
         if len({m.name for m in self.metrics}) != len(self.metrics):
             raise ValueError("duplicate metric names in one evaluation")
 
-    def to_dict(self) -> dict[str, Any]:
-        return to_json_data(self)
-
 
 @dataclass(frozen=True, slots=True)
-class TrainingMetricRecord:
+class TrainingMetricRecord(JsonRecord):
     run_id: str
     step_axis: str
     step: int
@@ -85,6 +78,3 @@ class TrainingMetricRecord:
 
         if len({m.name for m in self.metrics}) != len(self.metrics):
             raise ValueError("duplicate metric names in one training record")
-
-    def to_dict(self) -> dict[str, Any]:
-        return to_json_data(self)
