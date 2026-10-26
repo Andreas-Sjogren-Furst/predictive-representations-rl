@@ -47,7 +47,8 @@ The rules that matter; `tests/test_architecture.py` enforces them as import rule
   `workflows/`. (`visualization/` writes only the figure files it is asked to create.)
 - **Optional dependencies stay optional.** `domain` and `contracts` import neither NumPy nor torch.
   torch is imported only inside `agents/` (the FB package loads its torch-backed agent on first use)
-  and inside the training workflow's function body; Matplotlib only inside `visualization/`
+  and inside workflow function bodies (`four_rooms_training.py`, and `_runtime.py`, which pins torch
+  to one CPU thread for every torch workflow); Matplotlib only inside `visualization/`
   functions. `aeris --help`, run browsing and the tabular analysis work without torch, and without
   Matplotlib when plots are skipped.
 

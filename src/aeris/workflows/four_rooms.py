@@ -23,6 +23,7 @@ from aeris.domain.task import TaskEvidenceRef, TaskSpec
 from aeris.domain.validation import require_int
 from aeris.environments.four_rooms import FourRooms, Position
 from aeris.experiments.zero_shot import evaluate_zero_shot
+from aeris.workflows._runtime import use_single_cpu_thread
 
 # Run conventions shared by training (four_rooms_training.py) and the analyses here:
 # each evaluation label names a policy snapshot and the checkpoint id it was evaluated as.
@@ -106,6 +107,8 @@ def diagnose_fb_checkpoint(run_ref: RunRef) -> FBCheckpointReport:
     by content rather than by its label. Saves ``analysis/fb_checkpoint_v1.json``.
     """
     from aeris.agents.fb.checkpoint import load_agent
+
+    use_single_cpu_thread()
     from aeris.analysis.fb_representation import diagnose_fb_representation
 
     run = open_four_rooms_run(run_ref)
@@ -165,6 +168,8 @@ def evaluate_zero_shot_goals(
     ``analysis/zero_shot_goals_v1.json``.
     """
     from aeris.agents.fb.checkpoint import load_agent
+
+    use_single_cpu_thread()
 
     run = open_four_rooms_run(run_ref)
     dataset_spec = run.manifest.experiment.dataset

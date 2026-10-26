@@ -34,6 +34,7 @@ from aeris.experiments import (
     record_policy_snapshot,
     train_updates,
 )
+from aeris.workflows._runtime import use_single_cpu_thread
 from aeris.workflows.four_rooms import EVALUATION_CHECKPOINTS
 from aeris.workflows.provenance import code_revision
 
@@ -98,7 +99,7 @@ def train_four_rooms_fb(settings: FourRoomsFBTraining) -> TrainingOutcome:
 
     if settings.output.exists() and any(settings.output.iterdir()):
         raise FileExistsError(f"output directory must be empty: {settings.output}")
-    torch.set_num_threads(1)  # Fast and reproducible CPU behaviour for a tiny diagnostic.
+    use_single_cpu_thread()
     env = FourRooms(max_episode_steps=settings.max_steps)
     eval_env = FourRooms(max_episode_steps=settings.max_steps)
     task = env.goal_task(settings.goal)

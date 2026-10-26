@@ -54,7 +54,9 @@ def test_packages_import_only_lower_layers(package):
 def test_optional_dependencies_stay_where_they_belong():
     allowed = {
         "numpy": lambda package, path: package not in {"domain", "contracts", "cli"},
-        "torch": lambda package, path: package == "agents" or path.name == "four_rooms_training.py",
+        "torch": lambda package, path: (
+            package == "agents" or path.name in {"four_rooms_training.py", "_runtime.py"}
+        ),
         "matplotlib": lambda package, path: package == "visualization",
     }
     violations = [
