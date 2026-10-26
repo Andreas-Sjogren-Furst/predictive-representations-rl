@@ -17,7 +17,7 @@ class FBCheckpointReport(AnalysisReport):
     analysis: str = "fb_four_rooms_checkpoint_v1"
     run_id: str
     checkpoint: str
-    goal: tuple[int, int]
+    goal: tuple[int, ...]
     number_of_states: int
     gradient_updates: int
     gamma: float
@@ -36,13 +36,16 @@ class FBCheckpointReport(AnalysisReport):
     target_policy_entropy_fraction_of_uniform: float
     learned_action_spread_mean: float
     learned_action_margin_mean: float
-    state_positions: tuple[tuple[int, int], ...]
+    state_positions: tuple[tuple[int, ...], ...]
     state_action_improvement_agreement: tuple[bool, ...]
     learned_action_counts_non_goal: tuple[int, ...]
     exact_occupancy_correlation: float | None
     goal_action_advantage_correlation: float | None
     goal_action_agreement_with_exact_policy_improvement: float
     first_hit_goal_performance: PolicySummary
+    # Whether the greedy policy of this checkpoint equals the saved final policy
+    # snapshot; None when the run has no such snapshot.
+    final_snapshot_matches_checkpoint: bool | None = None
 
     def __post_init__(self) -> None:
         require_identifier("run_id", self.run_id)

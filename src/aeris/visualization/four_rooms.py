@@ -1,4 +1,4 @@
-"""Render saved AERIS Four Rooms artifacts without reloading a checkpoint."""
+"""Four Rooms figures from typed run records; no checkpoint or live policy needed."""
 
 from __future__ import annotations
 
@@ -7,15 +7,11 @@ from pathlib import Path
 
 import numpy as np
 
-from aeris.analysis.four_rooms import SNAPSHOT_PHASES, load_four_rooms_run
 from aeris.domain.artifacts import PolicySnapshot
 from aeris.domain.results import EvaluationRecord, TrainingMetricRecord
 from aeris.domain.trajectory import EvaluationTrajectory
 from aeris.environments.four_rooms import FourRooms
 from aeris.visualization._plotting import ACTION_ARROWS, draw_grid, pyplot, save_figure
-
-# Evaluation checkpoint labels written by examples/fb_four_rooms.py.
-TRAJECTORY_CHECKPOINTS = {"initial": "initial_in_memory", "final": "checkpoint.pt"}
 
 
 def render_policy_map(
@@ -108,27 +104,3 @@ def render_evaluation_success(records: Iterable[EvaluationRecord], output_file: 
     for i, (_, value, _) in enumerate(entries):
         ax.text(i, min(value + 0.025, 1.02), f"{value:.1%}", ha="center")
     return save_figure(fig, output_file)
-
-
-def render_four_rooms_report(run_directory: str | Path) -> tuple[Path, ...]:
-    """Render every recorded artifact of a run; does not require torch or a live policy."""
-    run = load_four_rooms_run(run_directory)
-    store, output = run.store, run.store.figures_dir
-    made: list[Path] = []
-    training = list(store.read_training_metrics())
-    if training:
-        made.append(render_training_metrics(training, output / "training.png"))
-    evaluations = list(store.read_evaluations())
-    if evaluations:
-        made.append(render_evaluation_success(evaluations, output / "success_rate.png"))
-    for phase in SNAPSHOT_PHASES:
-        snapshot = store.read_policy_snapshot(phase)
-        if snapshot is not None:
-            name = store.policy_snapshot_path(phase).stem
-            made.append(render_policy_map(snapshot, run.goal, output / f"{name}.png", name=name))
-    trajectories = list(store.read_trajectories())
-    for phase, checkpoint in TRAJECTORY_CHECKPOINTS.items():
-        first = next((t for t in trajectories if t.checkpoint_id == checkpoint), None)
-        if first is not None:
-            made.append(render_trajectory(first, run.goal, output / f"trajectory_{phase}.png"))
-    return tuple(made)

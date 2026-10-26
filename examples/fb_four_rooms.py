@@ -236,9 +236,9 @@ def main() -> None:
     # Plotting is deliberately outside the training exception/manifest logic.
     # A rendering failure must not mark successfully completed training as failed.
     if args.plots:
-        from aeris.visualization.four_rooms import render_four_rooms_report
+        from aeris.workflows.four_rooms import render_run_figures
 
-        made = render_four_rooms_report(args.output)
+        made = render_run_figures(args.output)
         print("Rendered:", ", ".join(str(f) for f in made))
 
 

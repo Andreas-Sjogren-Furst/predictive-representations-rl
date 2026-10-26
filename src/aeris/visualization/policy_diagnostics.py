@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from aeris.analysis.four_rooms import FourRoomsOracle, TabularPolicyAnalysis
+from aeris.analysis.goal_policy import GoalOracle, TabularPolicyAnalysis
 from aeris.analysis.tabular import PolicyDiagnostics
 from aeris.environments import FourRooms
 from aeris.visualization._plotting import ACTION_ARROWS, draw_grid, pyplot, save_figure
@@ -18,11 +18,11 @@ OPTIMAL_COLOR = "#16803c"
 SUBOPTIMAL_COLOR = "#d12626"
 
 
-def render_optimal_policy(oracle: FourRoomsOracle, output_file: str | Path) -> Path:
+def render_optimal_policy(oracle: GoalOracle, output_file: str | Path) -> Path:
     """Display *all* optimal choices per state; ties are not arbitrarily discarded."""
     fig, ax = pyplot().subplots(figsize=(7, 7))
     draw_grid(ax, FourRooms(), oracle.goal)
-    for i, (row, col) in enumerate(oracle.positions):
+    for i, (row, col) in enumerate(oracle.states):
         if i == oracle.goal_index:
             continue
         symbols = "".join(
@@ -34,7 +34,7 @@ def render_optimal_policy(oracle: FourRoomsOracle, output_file: str | Path) -> P
 
 
 def render_policy_gap(
-    oracle: FourRoomsOracle,
+    oracle: GoalOracle,
     actions: np.ndarray,
     diagnostics: PolicyDiagnostics,
     output_file: str | Path,
@@ -46,7 +46,7 @@ def render_policy_gap(
 
     fig, ax = pyplot().subplots(figsize=(7, 7))
     draw_grid(ax, FourRooms(), oracle.goal)
-    for i, (row, col) in enumerate(oracle.positions):
+    for i, (row, col) in enumerate(oracle.states):
         if i == oracle.goal_index:
             continue
         color = OPTIMAL_COLOR if diagnostics.optimal_by_state[i] else SUBOPTIMAL_COLOR

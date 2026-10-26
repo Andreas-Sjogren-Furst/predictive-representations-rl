@@ -19,30 +19,28 @@ from pathlib import Path
 
 
 def render(args: argparse.Namespace) -> None:
-    from aeris.visualization.four_rooms import render_four_rooms_report
+    from aeris.workflows.four_rooms import render_run_figures
 
-    for path in render_four_rooms_report(args.run_dir):
+    for path in render_run_figures(args.run_dir):
         print(path)
 
 
 def analyze(args: argparse.Namespace) -> None:
-    from aeris.analysis.four_rooms import analyze_saved_four_rooms_run
+    from aeris.workflows.four_rooms import analyze_saved_policies, render_policy_figures
 
-    analysis = analyze_saved_four_rooms_run(args.run_dir, gamma=args.gamma)
+    analysis = analyze_saved_policies(args.run_dir, gamma=args.gamma)
     for phase, metrics in analysis.report.snapshots.items():
         print(f"{phase}: {metrics}")
     print(f"Saved {args.run_dir / 'analysis' / analysis.report.ARTIFACT_NAME}")
     if args.plots:
-        from aeris.visualization.policy_diagnostics import render_tabular_policy_figures
-
-        for path in render_tabular_policy_figures(analysis, args.run_dir / "figures"):
+        for path in render_policy_figures(args.run_dir, analysis):
             print("Rendered:", path)
 
 
 def diagnose(args: argparse.Namespace) -> None:
-    from aeris.analysis.four_rooms.fb_checkpoint import analyze_fb_checkpoint
+    from aeris.workflows.four_rooms import diagnose_fb_checkpoint, render_fb_figures
 
-    report = analyze_fb_checkpoint(args.run_dir)
+    report = diagnose_fb_checkpoint(args.run_dir)
     for name in (
         "gradient_updates",
         "backward_effective_rank",
@@ -50,17 +48,14 @@ def diagnose(args: argparse.Namespace) -> None:
         "exact_occupancy_correlation",
         "goal_action_advantage_correlation",
         "goal_action_agreement_with_exact_policy_improvement",
+        "final_snapshot_matches_checkpoint",
     ):
         print(f"{name}: {getattr(report, name)}")
     print("first_hit_goal_performance:", report.first_hit_goal_performance)
     print(f"Saved {args.run_dir / 'analysis' / report.ARTIFACT_NAME}")
     if args.plots:
-        from aeris.visualization.fb_checkpoint import render_fb_action_alignment
-
-        path = render_fb_action_alignment(
-            report, args.run_dir / "figures" / "fb_action_alignment.png"
-        )
-        print("Rendered:", path)
+        for path in render_fb_figures(args.run_dir, report):
+            print("Rendered:", path)
 
 
 def parse_args() -> argparse.Namespace:

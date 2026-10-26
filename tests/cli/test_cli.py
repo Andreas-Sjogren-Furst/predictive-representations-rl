@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from typer.testing import CliRunner
 
-from aeris.analysis.four_rooms import build_four_rooms_oracle
+from aeris.analysis.goal_policy import build_goal_oracle
 from aeris.cli.main import app
 from aeris.domain import EvaluationRecord, MetricValue, PolicySnapshot, TrainingMetricRecord
 from aeris.environments import FourRooms
@@ -107,10 +107,10 @@ def test_invalid_manifest_is_reported(tmp_path):
 def test_analysis_calls_existing_saved_run_implementation(tmp_path):
     run = _run(tmp_path / "run")
     directory = run.root
-    oracle = build_four_rooms_oracle(FourRooms(), (9, 9))
+    oracle = build_goal_oracle(FourRooms().tabular_dynamics(), (9, 9), gamma=0.99)
     optimal_actions = np.argmax(oracle.optimal.optimal_actions, axis=1)
     run.write_policy_snapshot(
-        "final", PolicySnapshot(states=oracle.positions, actions=optimal_actions)
+        "final", PolicySnapshot(states=oracle.states, actions=optimal_actions)
     )
     result = runner.invoke(app, ["analysis", "four-rooms", str(directory), "--no-plots"])
     assert result.exit_code == 0, result.output

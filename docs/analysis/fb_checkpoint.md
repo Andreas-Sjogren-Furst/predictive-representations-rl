@@ -2,6 +2,10 @@
 
 This diagnostic is deliberately **FB-specific**, whereas `analysis/tabular_occupancy.py` is independent of the algorithm. It evaluates a saved local checkpoint and never alters weights or trains the model.
 
+Code: the numerical diagnostic is `analysis/fb_representation.py` (`diagnose_fb_representation`, which takes a loaded agent, the environment's `TabularModel` and a `GoalOracle`). Opening the run, checking eligibility (completed Four Rooms run, oracle dataset verified by fingerprint and full state-action coverage, checkpoint compatible with the environment's `SpaceSpec`) and saving the typed `FBCheckpointReport` happen in `workflows/four_rooms.py` (`diagnose_fb_checkpoint`).
+
+If the run has a saved final policy snapshot, `final_snapshot_matches_checkpoint` reports whether it equals the checkpoint's greedy policy (`null` without a snapshot). A mismatch is reported, not raised, so a stale snapshot never hides the rest of the diagnostic.
+
 ## Scientific questions
 
 1. Does the learned forward-backward product resemble the exact **continuing-state discounted visitation density** for the task-conditioned target policy?

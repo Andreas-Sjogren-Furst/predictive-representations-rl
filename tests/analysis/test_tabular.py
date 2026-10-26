@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from aeris.analysis.four_rooms import build_four_rooms_oracle
+from aeris.analysis.goal_policy import build_goal_oracle
 from aeris.analysis.tabular import compare_deterministic_policy, value_iteration
 from aeris.domain import PolicySnapshot
 from aeris.environments import FourRooms, TabularDynamics, TabularMDP
@@ -21,8 +21,8 @@ def test_value_iteration_simple_goal_ties():
 def test_shortest_path_consistent_with_discounted_goal_value():
     env = FourRooms()
     goal = (9, 9)
-    model = build_four_rooms_oracle(env, goal, gamma=0.9)
-    for i, pos in enumerate(model.positions):
+    model = build_goal_oracle(env.tabular_dynamics(), goal, gamma=0.9)
+    for i, pos in enumerate(model.states):
         d = env.shortest_distance(pos, goal)
         if pos == goal:
             assert model.optimal.values[i] == pytest.approx(0)
@@ -35,7 +35,7 @@ def test_shortest_path_consistent_with_discounted_goal_value():
 
 def test_optimal_policy_has_full_success_from_all_starts():
     env = FourRooms()
-    model = build_four_rooms_oracle(env, (9, 9))
+    model = build_goal_oracle(env.tabular_dynamics(), (9, 9), gamma=0.99)
     policy = np.argmax(model.optimal.optimal_actions, axis=1).astype(np.int64)
     diag = compare_deterministic_policy(
         policy,
@@ -53,8 +53,8 @@ def test_optimal_policy_has_full_success_from_all_starts():
 
 def test_policy_loop_does_not_accidentally_count_as_success():
     env = FourRooms()
-    model = build_four_rooms_oracle(env, (9, 9))
-    policy = np.zeros(len(model.positions), dtype=np.int64)  # always up
+    model = build_goal_oracle(env.tabular_dynamics(), (9, 9), gamma=0.99)
+    policy = np.zeros(len(model.states), dtype=np.int64)  # always up
     diag = compare_deterministic_policy(
         policy,
         model.dynamics,
@@ -70,12 +70,12 @@ def test_policy_loop_does_not_accidentally_count_as_success():
 
 def test_snapshot_alignment_with_shuffled_state_order():
     env = FourRooms()
-    model = build_four_rooms_oracle(env, (9, 9))
-    positions = np.array(model.positions)
+    model = build_goal_oracle(env.tabular_dynamics(), (9, 9), gamma=0.99)
+    positions = np.array(model.states)
     actions = np.argmax(model.optimal.optimal_actions, axis=1).astype(np.int64)
     order = np.random.default_rng(2).permutation(len(positions))
     snapshot = PolicySnapshot(states=positions[order], actions=actions[order])
-    aligned = np.asarray(snapshot.actions_for(model.positions))
+    aligned = np.asarray(snapshot.actions_for(model.states))
     diag = model.compare(aligned, max_steps=100)
     assert np.array_equal(aligned, actions)
     assert diag.optimal_action_fraction == 1.0
@@ -83,8 +83,8 @@ def test_snapshot_alignment_with_shuffled_state_order():
 
 def test_snapshot_missing_state_rejected():
     env = FourRooms()
-    model = build_four_rooms_oracle(env, (9, 9))
-    positions = model.positions[:-1]
+    model = build_goal_oracle(env.tabular_dynamics(), (9, 9), gamma=0.99)
+    positions = model.states[:-1]
     snapshot = PolicySnapshot(states=positions, actions=[0] * len(positions))
     with pytest.raises(ValueError, match="don't match"):
-        snapshot.actions_for(model.positions)
+        snapshot.actions_for(model.states)

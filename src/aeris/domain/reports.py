@@ -49,7 +49,7 @@ class TabularPolicyReport(AnalysisReport):
     analysis: str = "four_rooms_tabular_policy_v1"
     run_id: str
     task_id: str | None
-    goal: tuple[int, int]
+    goal: tuple[int, ...]
     reward_definition: str = "reward 1 on entering goal; goal terminal; 0 otherwise"
     pretraining_rewards_used: bool = False
     discount: float

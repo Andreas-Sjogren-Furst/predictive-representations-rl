@@ -51,6 +51,8 @@ src/aeris/
   experiments/     Generic collection, training and goal-evaluation loops
   data/            Run directories (typed read/write of every artifact), file formats, run catalog
   analysis/        Exact tabular baselines and run/checkpoint diagnostics (no file I/O, no plotting)
+  workflows/       Open a run, check eligibility, run analyses, save reports, render figures
+  cli/             The `aeris` command (Typer): browse runs and run workflows
   visualization/   Optional Matplotlib figures from saved artifacts
 ```
 
