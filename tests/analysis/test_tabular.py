@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
 
-from aeris.analysis.four_rooms import build_four_rooms_oracle, load_policy_actions
+from aeris.analysis.four_rooms import build_four_rooms_oracle
 from aeris.analysis.tabular import compare_deterministic_policy, value_iteration
+from aeris.domain import PolicySnapshot
 from aeris.environments import FourRooms
 
 
@@ -65,29 +66,26 @@ def test_policy_loop_does_not_accidentally_count_as_success():
     assert diag.mean_excess_steps_on_success is None
 
 
-def test_snapshot_alignment_with_shuffled_state_order(tmp_path):
+def test_snapshot_alignment_with_shuffled_state_order():
     env = FourRooms()
     model = build_four_rooms_oracle(env, (9, 9))
     positions = np.array(model.positions)
     actions = np.argmax(model.optimal.optimal_actions, axis=1).astype(np.int64)
     order = np.random.default_rng(2).permutation(len(positions))
-    snap = tmp_path / "policy.npz"
-    np.savez_compressed(snap, positions=positions[order], actions=actions[order])
-    aligned = load_policy_actions(snap, model.positions)
+    snapshot = PolicySnapshot(states=positions[order], actions=actions[order])
+    aligned = np.asarray(snapshot.actions_for(model.positions))
     diag = model.compare(aligned, max_steps=100)
     assert np.array_equal(aligned, actions)
     assert diag.optimal_action_fraction == 1.0
 
 
-def test_snapshot_missing_state_rejected(tmp_path):
+def test_snapshot_missing_state_rejected():
     env = FourRooms()
     model = build_four_rooms_oracle(env, (9, 9))
-    positions = np.array(model.positions)
-    positions[-1] = positions[-2]
-    snap = tmp_path / "bad.npz"
-    np.savez_compressed(snap, positions=positions, actions=np.zeros(len(positions), dtype=int))
+    positions = model.positions[:-1]
+    snapshot = PolicySnapshot(states=positions, actions=[0] * len(positions))
     with pytest.raises(ValueError, match="don't match"):
-        load_policy_actions(snap, model.positions)
+        snapshot.actions_for(model.positions)
 
 
 def test_bad_mdp_input_and_discount_rejected():

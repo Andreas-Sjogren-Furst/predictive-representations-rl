@@ -49,7 +49,8 @@ maze scores, nor proof of zero-shot generalization beyond this test case.
 - `agents/fb/batch.py`: FB-specific training batch sampling (already exists).
 - `experiments/training.py`: generic BatchProvider → TrainableAgent updates.
 - `experiments/evaluation.py`: generic agent actions → goal success metrics.
-- `data/recorder.py`: standard experiment metrics/manifest persistence.
+- `data/run_directory.py`: `RunDirectory`, typed reading and writing of the manifest, metrics, evaluations, trajectories, policy snapshots and reports.
+- `data/artifacts.py`: NumPy formats for policy snapshots and the fingerprinted transition dataset.
 - `examples/fb_four_rooms.py`: **composition root**; selects FB and FourRooms.
 
 The runner and evaluator never import FB or FourRooms. That is the first

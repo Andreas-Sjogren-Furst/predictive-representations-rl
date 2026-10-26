@@ -10,69 +10,37 @@ from typer.testing import CliRunner
 
 from aeris.analysis.four_rooms import build_four_rooms_oracle
 from aeris.cli.main import app
+from aeris.domain import EvaluationRecord, MetricValue, PolicySnapshot, TrainingMetricRecord
 from aeris.environments import FourRooms
+from conftest import write_four_rooms_run
 
 runner = CliRunner()
 
 
-def _run(directory: Path, *, identifier: str = "run-42", environment: str = "four_rooms") -> Path:
-    directory.mkdir(parents=True)
-    (directory / "manifest.json").write_text(
-        json.dumps(
-            {
-                "run_id": identifier,
-                "status": "completed",
-                "selected_checkpoint": "checkpoint.pt",
-                "experiment": {
-                    "name": "fb_demo",
-                    "seed": 42,
-                    "agent": {"name": "discrete_fb"},
-                    "environment": {"name": environment},
-                    "dataset": {"name": "oracle"},
-                    "evaluation": {
-                        "protocol": {"settings": {"max_steps": 10}},
-                        "targets": [
-                            {
-                                "task": {
-                                    "task_id": "goal",
-                                    "settings": {"goal_row": 9, "goal_col": 9},
-                                }
-                            }
-                        ],
-                    },
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (directory / "training_metrics.jsonl").write_text(
-        "\n".join(
-            json.dumps(
-                {
-                    "run_id": identifier,
-                    "step_axis": "gradient_updates",
-                    "step": i,
-                    "metrics": [{"name": "fb_loss", "value": i * 0.25}],
-                }
+def _run(directory: Path, *, identifier: str = "run-42", environment: str = "four_rooms"):
+    """A real run directory: manifest, three training records and one evaluation."""
+    run = write_four_rooms_run(directory, run_id=identifier, environment=environment)
+    for i in range(3):
+        run.write_training_metrics(
+            TrainingMetricRecord(
+                identifier,
+                "gradient_updates",
+                i,
+                (MetricValue("fb_loss", i * 0.25, "unitless", "instant"),),
             )
-            for i in range(3)
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    (directory / "evaluations.jsonl").write_text(
-        json.dumps(
-            {
-                "run_id": identifier,
-                "checkpoint_id": "checkpoint.pt",
-                "task_id": "goal",
-                "metrics": [{"name": "success_rate", "value": 0.5}],
-            }
+    run.write_evaluation(
+        EvaluationRecord(
+            identifier,
+            "checkpoint.pt",
+            "goal",
+            "goal_reaching_v1",
+            42,
+            2,
+            (MetricValue("success_rate", 0.5, "fraction", "mean"),),
         )
-        + "\n",
-        encoding="utf-8",
     )
-    return directory
+    return run
 
 
 def test_help_contains_only_implemented_commands():
@@ -86,7 +54,7 @@ def test_help_contains_only_implemented_commands():
 
 
 def test_list_runs_without_loading_checkpoints(tmp_path):
-    folder = _run(tmp_path / "arbitrary_directory_name")
+    folder = _run(tmp_path / "arbitrary_directory_name").root
     (folder / "checkpoint.pt").write_bytes(b"not a real checkpoint")
     (tmp_path / "not_a_run").mkdir()
     result = runner.invoke(app, ["runs", "list", "--root", str(tmp_path)])
@@ -137,12 +105,12 @@ def test_invalid_manifest_is_reported(tmp_path):
 
 
 def test_analysis_calls_existing_saved_run_implementation(tmp_path):
-    directory = _run(tmp_path / "run")
-    env = FourRooms()
-    oracle = build_four_rooms_oracle(env, (9, 9))
+    run = _run(tmp_path / "run")
+    directory = run.root
+    oracle = build_four_rooms_oracle(FourRooms(), (9, 9))
     optimal_actions = np.argmax(oracle.optimal.optimal_actions, axis=1)
-    np.savez_compressed(
-        directory / "policy_final.npz", positions=oracle.positions, actions=optimal_actions
+    run.write_policy_snapshot(
+        "final", PolicySnapshot(states=oracle.positions, actions=optimal_actions)
     )
     result = runner.invoke(app, ["analysis", "four-rooms", str(directory), "--no-plots"])
     assert result.exit_code == 0, result.output
@@ -156,7 +124,7 @@ def test_analysis_calls_existing_saved_run_implementation(tmp_path):
 
 
 def test_analysis_invalid_environment_exits_cleanly(tmp_path):
-    directory = _run(tmp_path / "run", environment="other_env")
+    directory = _run(tmp_path / "run", environment="other_env").root
     result = runner.invoke(app, ["analysis", "four-rooms", str(directory), "--no-plots"])
     assert result.exit_code == 1
     assert "only Four Rooms runs are supported" in result.output

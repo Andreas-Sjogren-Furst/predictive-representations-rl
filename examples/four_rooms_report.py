@@ -29,9 +29,9 @@ def analyze(args: argparse.Namespace) -> None:
     from aeris.analysis.four_rooms import analyze_saved_four_rooms_run
 
     analysis = analyze_saved_four_rooms_run(args.run_dir, gamma=args.gamma)
-    for phase, metrics in analysis.report["snapshots"].items():
+    for phase, metrics in analysis.report.snapshots.items():
         print(f"{phase}: {metrics}")
-    print(f"Saved {args.run_dir / 'analysis' / 'tabular_policy_v1.json'}")
+    print(f"Saved {args.run_dir / 'analysis' / analysis.report.ARTIFACT_NAME}")
     if args.plots:
         from aeris.visualization.policy_diagnostics import render_tabular_policy_figures
 
@@ -51,9 +51,9 @@ def diagnose(args: argparse.Namespace) -> None:
         "goal_action_advantage_correlation",
         "goal_action_agreement_with_exact_policy_improvement",
     ):
-        print(f"{name}: {report[name]}")
-    print("first_hit_goal_performance:", report["first_hit_goal_performance"])
-    print(f"Saved {args.run_dir / 'analysis' / 'fb_checkpoint_v1.json'}")
+        print(f"{name}: {getattr(report, name)}")
+    print("first_hit_goal_performance:", report.first_hit_goal_performance)
+    print(f"Saved {args.run_dir / 'analysis' / report.ARTIFACT_NAME}")
     if args.plots:
         from aeris.visualization.fb_checkpoint import render_fb_action_alignment
 

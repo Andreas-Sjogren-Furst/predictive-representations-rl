@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from aeris.data import JsonlRunRecorder
+from aeris.data import RunDirectory
 from aeris.domain.agent import ActionResult
 from aeris.environments import FourRooms
 from aeris.experiments import evaluate_goal_policy
@@ -28,7 +28,7 @@ def test_trajectory_capture_preserves_metrics_and_actual_transitions(tmp_path):
     goal = (9, 9)
     env = FourRooms(max_episode_steps=80)
     agent = OraclePolicy(env, goal)
-    sink = JsonlRunRecorder(tmp_path)
+    sink = RunDirectory(tmp_path)
     result = evaluate_goal_policy(
         agent,
         env,
@@ -65,7 +65,7 @@ def test_trajectory_capture_preserves_metrics_and_actual_transitions(tmp_path):
 def test_no_trajectory_capture_leaves_no_file(tmp_path):
     env = FourRooms(max_episode_steps=2)
     agent = OraclePolicy(env, (9, 9))
-    recorder = JsonlRunRecorder(tmp_path)
+    recorder = RunDirectory(tmp_path)
     evaluate_goal_policy(
         agent,
         env,
@@ -100,7 +100,7 @@ def test_serialization_rejects_nonfinite_without_corrupting_file(tmp_path):
         success=False,
     )
     with pytest.raises(ValueError, match="finite"):
-        JsonlRunRecorder(tmp_path).write_trajectory(rec)
+        RunDirectory(tmp_path).write_trajectory(rec)
     assert not (tmp_path / "trajectories.jsonl").exists()
 
 

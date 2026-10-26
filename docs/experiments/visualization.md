@@ -10,7 +10,7 @@ is **not** a new training algorithm or a paper replication.
   next observations, rewards if present, termination/truncation, success,
   checkpoint identity, task identity, episode index and seed. The hook is
   optional and does not affect policy selection or aggregate success rates.
-- `JsonlRunRecorder.write_trajectory` writes `trajectories.jsonl` separately
+- `RunDirectory.write_trajectory` writes `trajectories.jsonl` separately
   from `evaluations.jsonl`. The JSON format is suitable for **small vector
   observations**. Do not use JSONL for large pixel frames; use a separate
   binary format and link artifacts in a future schema.

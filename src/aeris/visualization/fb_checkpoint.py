@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
+from aeris.agents.fb.reports import FBCheckpointReport
 from aeris.environments import FourRooms
 from aeris.visualization._plotting import (
     GOAL_COLOR,
@@ -17,7 +17,7 @@ from aeris.visualization._plotting import (
 )
 
 
-def render_fb_action_alignment(report: dict[str, Any], output_file: str | Path) -> Path:
+def render_fb_action_alignment(report: FBCheckpointReport, output_file: str | Path) -> Path:
     """Map whether FB's greedy choice improves its own target-Boltzmann policy.
 
     This is NOT a map of globally optimal actions for terminal navigation.
@@ -26,23 +26,18 @@ def render_fb_action_alignment(report: dict[str, Any], output_file: str | Path) 
     from matplotlib.colors import ListedColormap
 
     env = FourRooms()
-    positions = report["state_positions"]
-    agreement = report["state_action_improvement_agreement"]
-    if len(positions) != len(env.positions) or len(agreement) != len(positions):
-        raise ValueError("malformed statewise FB diagnostic")
-    grid = np.full((env.HEIGHT, env.WIDTH), np.nan, dtype=np.float64)
-    expected = set(env.positions)
-    visited = set()
-    for pos, good in zip(positions, agreement, strict=True):
-        point = (int(pos[0]), int(pos[1]))
-        if point not in expected or point in visited or type(good) is not bool:
-            raise ValueError("invalid or duplicate statewise FB diagnostic")
-        visited.add(point)
-        grid[point] = float(good)
-    if visited != expected:
+    if len(report.state_positions) != len(env.positions) or set(report.state_positions) != set(
+        env.positions
+    ):
         raise ValueError("statewise FB diagnostic does not cover the maze")
+    grid = np.full((env.HEIGHT, env.WIDTH), np.nan, dtype=np.float64)
+    for point, good in zip(
+        report.state_positions, report.state_action_improvement_agreement, strict=True
+    ):
+        grid[point] = float(good)
+    expected = set(env.positions)
 
-    goal = tuple(report["goal"])
+    goal = report.goal
     fig, ax = pyplot().subplots(figsize=(6.2, 6.2))
     ax.set_facecolor(WALL_COLOR)
     ax.imshow(

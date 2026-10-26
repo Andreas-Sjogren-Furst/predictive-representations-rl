@@ -1,28 +1,26 @@
 from __future__ import annotations
 
-import json
 from hashlib import sha256
 
 import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
-from aeris.agents.fb import DiscreteFBAgent, DiscreteFBConfig
+from aeris.agents.fb import DiscreteFBAgent, DiscreteFBConfig, FBCheckpointReport
+from aeris.agents.fb.checkpoint import save_checkpoint
 from aeris.analysis.four_rooms.fb_checkpoint import analyze_fb_checkpoint
+from aeris.data import RunDirectory, write_transitions_npz
+from aeris.domain import PolicySnapshot
 from aeris.environments import FourRooms
 
 
-def make_run(tmp_path):
+def make_run(tmp_path, four_rooms_run, *, origin="oracle", transitions=None):
+    """An oracle-dataset run with an untrained FB checkpoint, as the training example saves it."""
     torch.set_num_threads(1)
     env = FourRooms()
-    transitions = tuple(env.all_transitions())
-    dataset = tmp_path / "dataset.npz"
-    np.savez_compressed(
-        dataset,
-        observations=np.stack([t.observation for t in transitions]),
-        actions=np.array([t.action for t in transitions], dtype=np.int64),
-        next_observations=np.stack([t.next_observation for t in transitions]),
-    )
+    dataset = RunDirectory(tmp_path / "run").dataset_path
+    fingerprint = write_transitions_npz(dataset, transitions or tuple(env.all_transitions()))
+    run = four_rooms_run(max_steps=15, dataset_settings={"origin": origin, "sha256": fingerprint})
     model = DiscreteFBAgent(
         DiscreteFBConfig(
             observation_dim=env.observation_dim,
@@ -32,82 +30,55 @@ def make_run(tmp_path):
             seed=123,
         )
     )
-    torch.save({"agent": model.state_dict()}, tmp_path / "checkpoint.pt")
-    manifest = {
-        "run_id": "test",
-        "status": "completed",
-        "experiment": {
-            "environment": {"name": "four_rooms"},
-            "dataset": {
-                "settings": {"origin": "oracle", "sha256": sha256(dataset.read_bytes()).hexdigest()}
-            },
-            "evaluation": {
-                "targets": [{"task": {"settings": {"goal_row": 9, "goal_col": 9}}}],
-                "protocol": {"settings": {"max_steps": 15}},
-            },
-        },
-    }
-    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
-    return env, model, manifest
+    save_checkpoint(run.checkpoint_path, model)
+    return env, run
 
 
-def test_checkpoint_diagnostic_does_not_retrain_or_require_matplotlib(tmp_path):
-    _, _, _ = make_run(tmp_path)
-    original = (tmp_path / "checkpoint.pt").read_bytes()
-    report = analyze_fb_checkpoint(tmp_path)
-    assert report["gradient_updates"] == 0
-    assert report["number_of_states"] > 40
-    assert 0 <= report["goal_action_agreement_with_exact_policy_improvement"] <= 1
-    assert 0 <= report["backward_effective_rank"] <= 6
-    assert sum(report["learned_action_counts_non_goal"]) == report["number_of_states"] - 1
-    assert len(report["state_positions"]) == report["number_of_states"]
-    assert len(report["state_action_improvement_agreement"]) == report["number_of_states"]
-    assert report == json.loads((tmp_path / "analysis/fb_checkpoint_v1.json").read_text())
-    assert (tmp_path / "checkpoint.pt").read_bytes() == original
+def test_checkpoint_diagnostic_does_not_retrain_or_require_matplotlib(tmp_path, four_rooms_run):
+    _, run = make_run(tmp_path, four_rooms_run)
+    original = run.checkpoint_path.read_bytes()
+    report = analyze_fb_checkpoint(run)
+    assert report.gradient_updates == 0
+    assert report.number_of_states > 40
+    assert 0 <= report.goal_action_agreement_with_exact_policy_improvement <= 1
+    assert 0 <= report.backward_effective_rank <= 6
+    assert sum(report.learned_action_counts_non_goal) == report.number_of_states - 1
+    assert run.read_report(FBCheckpointReport) == report
+    assert run.checkpoint_path.read_bytes() == original
 
 
-def test_nonuniform_dataset_refused(tmp_path):
-    _, _, manifest = make_run(tmp_path)
-    manifest["experiment"]["dataset"]["settings"]["origin"] = "random"
-    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+def test_nonuniform_dataset_refused(tmp_path, four_rooms_run):
+    _, run = make_run(tmp_path, four_rooms_run, origin="random")
     with pytest.raises(ValueError, match="oracle dataset"):
-        analyze_fb_checkpoint(tmp_path)
+        analyze_fb_checkpoint(run)
 
 
-def test_dataset_tampering_refused(tmp_path):
-    _, _, _ = make_run(tmp_path)
-    with (tmp_path / "dataset.npz").open("ab") as f:
+def test_dataset_tampering_refused(tmp_path, four_rooms_run):
+    _, run = make_run(tmp_path, four_rooms_run)
+    with run.dataset_path.open("ab") as f:
         f.write(b"tampered")
     with pytest.raises(ValueError, match="fingerprint"):
-        analyze_fb_checkpoint(tmp_path)
+        analyze_fb_checkpoint(run)
 
 
-def test_bad_state_action_coverage_refused_even_with_consistent_hash(tmp_path):
-    _, _, manifest = make_run(tmp_path)
-    dataset = tmp_path / "dataset.npz"
-    with np.load(dataset, allow_pickle=False) as data:
-        observations, actions, nxt = (
-            data["observations"].copy(),
-            data["actions"].copy(),
-            data["next_observations"].copy(),
-        )
-    observations[1], actions[1], nxt[1] = observations[0].copy(), actions[0], nxt[0].copy()
-    np.savez_compressed(dataset, observations=observations, actions=actions, next_observations=nxt)
-    manifest["experiment"]["dataset"]["settings"]["sha256"] = sha256(
-        dataset.read_bytes()
-    ).hexdigest()
-    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+def test_bad_state_action_coverage_refused_even_with_consistent_hash(tmp_path, four_rooms_run):
+    transitions = list(FourRooms().all_transitions())
+    transitions[1] = transitions[0]
+    _, run = make_run(tmp_path, four_rooms_run, transitions=tuple(transitions))
     with pytest.raises(ValueError, match="duplicate or missing"):
-        analyze_fb_checkpoint(tmp_path)
+        analyze_fb_checkpoint(run)
 
 
-def test_stale_snapshot_detected(tmp_path):
-    env, _, _ = make_run(tmp_path)
-    positions = np.asarray(env.positions)
-    np.savez_compressed(
-        tmp_path / "policy_final.npz",
-        positions=positions,
-        actions=np.full(len(positions), 10, dtype=np.int64),
+def test_stale_snapshot_detected(tmp_path, four_rooms_run):
+    env, run = make_run(tmp_path, four_rooms_run)
+    run.write_policy_snapshot(
+        "final", PolicySnapshot(states=env.positions, actions=np.full(len(env.positions), 10))
     )
     with pytest.raises(ValueError, match="invalid actions"):
-        analyze_fb_checkpoint(tmp_path)
+        analyze_fb_checkpoint(run)
+
+
+def test_dataset_fingerprint_is_sha256(tmp_path, four_rooms_run):
+    _, run = make_run(tmp_path, four_rooms_run)
+    expected = run.read_manifest().experiment.dataset.settings["sha256"]
+    assert sha256(run.dataset_path.read_bytes()).hexdigest() == expected

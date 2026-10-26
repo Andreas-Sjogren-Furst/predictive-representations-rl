@@ -4,7 +4,7 @@ import numpy as np
 
 from aeris.agents.fb import DiscreteFBAgent, DiscreteFBConfig, FBTransitionSampler
 from aeris.contracts.agent import Agent, TrainableAgent
-from aeris.data import JsonlRunRecorder
+from aeris.data import RunDirectory
 from aeris.domain.agent import ActionResult
 from aeris.domain.results import MetricValue
 from aeris.environments import FourRooms
@@ -38,7 +38,7 @@ def test_runner_uses_only_capability_protocols(tmp_path):
     agent = DummyAgent()
     assert isinstance(agent, Agent)
     assert isinstance(agent, TrainableAgent)
-    recorder = JsonlRunRecorder(tmp_path)
+    recorder = RunDirectory(tmp_path)
     summary = train_updates(
         agent,
         DummyBatches(),

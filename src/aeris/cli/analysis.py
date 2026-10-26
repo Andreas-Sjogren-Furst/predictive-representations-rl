@@ -34,12 +34,12 @@ def four_rooms(
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     report = analysis.report
-    typer.echo(f"Analyzed run: {report['run_id']}")
-    for phase, metrics in report["snapshots"].items():
+    typer.echo(f"Analyzed run: {report.run_id}")
+    for phase, metrics in report.snapshots.items():
         typer.echo(
-            f"  {phase}: optimal action fraction={metrics['optimal_action_fraction']:.1%}, "
-            f"goal success={metrics['rollout_success_fraction']:.1%}"
+            f"  {phase}: optimal action fraction={metrics.optimal_action_fraction:.1%}, "
+            f"goal success={metrics.rollout_success_fraction:.1%}"
         )
-    typer.echo(f"Report: {run_dir / 'analysis' / 'tabular_policy_v1.json'}")
+    typer.echo(f"Report: {run_dir / 'analysis' / report.ARTIFACT_NAME}")
     if not no_plots:
         typer.echo(f"Figures: {run_dir / 'figures'}")

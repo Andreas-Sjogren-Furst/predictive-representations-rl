@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from aeris.domain.reports import PolicySummary
 from aeris.domain.validation import require_int
 
 
@@ -85,14 +86,14 @@ class PolicyDiagnostics:
     succeeds_by_state: np.ndarray
     rollout_steps_by_state: np.ndarray
 
-    def summary(self) -> dict[str, float | None]:
-        return {
-            "optimal_action_fraction": self.optimal_action_fraction,
-            "mean_action_regret": self.mean_action_regret,
-            "maximum_action_regret": self.maximum_action_regret,
-            "rollout_success_fraction": self.rollout_success_fraction,
-            "mean_excess_steps_on_success": self.mean_excess_steps_on_success,
-        }
+    def summary(self) -> PolicySummary:
+        return PolicySummary(
+            optimal_action_fraction=self.optimal_action_fraction,
+            mean_action_regret=self.mean_action_regret,
+            maximum_action_regret=self.maximum_action_regret,
+            rollout_success_fraction=self.rollout_success_fraction,
+            mean_excess_steps_on_success=self.mean_excess_steps_on_success,
+        )
 
 
 def compare_deterministic_policy(

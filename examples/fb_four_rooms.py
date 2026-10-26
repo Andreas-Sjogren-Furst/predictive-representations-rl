@@ -8,16 +8,14 @@ Inspect the run afterwards with examples/four_rooms_report.py.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
-from hashlib import sha256
 from pathlib import Path
 
 import numpy as np
 import torch
 
 from aeris.agents.fb import DiscreteFBAgent, DiscreteFBConfig, FBTransitionSampler
-from aeris.analysis.four_rooms import save_policy_snapshot
-from aeris.data import JsonlRunRecorder
+from aeris.agents.fb.checkpoint import save_checkpoint
+from aeris.data import RunDirectory, write_transitions_npz
 from aeris.domain import (
     ComponentSpec,
     EvaluationPlan,
@@ -29,8 +27,14 @@ from aeris.domain import (
     TrainingPlan,
     Transition,
 )
+from aeris.domain.spaces import DiscreteActionSpec
 from aeris.environments import FourRooms
-from aeris.experiments import collect_transitions, evaluate_goal_policy, train_updates
+from aeris.experiments import (
+    collect_transitions,
+    evaluate_goal_policy,
+    record_policy_snapshot,
+    train_updates,
+)
 
 REPRESENTATION_DIM = 32
 HIDDEN_DIM = 128
@@ -87,17 +91,6 @@ def build_dataset(env: FourRooms, args: argparse.Namespace) -> tuple[Transition,
     ).transitions
 
 
-def save_dataset(path: Path, transitions: Sequence[Transition]) -> str:
-    """Write the fixed training data and return its SHA-256 fingerprint."""
-    np.savez_compressed(
-        path,
-        observations=np.stack([t.observation for t in transitions]),
-        actions=np.array([t.action for t in transitions], dtype=np.int64),
-        next_observations=np.stack([t.next_observation for t in transitions]),
-    )
-    return sha256(path.read_bytes()).hexdigest()
-
-
 def build_spec(
     args: argparse.Namespace, task: TaskSpec, *, count: int, fingerprint: str
 ) -> ExperimentSpec:
@@ -141,8 +134,8 @@ def main() -> None:
 
     # Fixed training data, no environment interaction after this point.
     transitions = build_dataset(env, args)
-    args.output.mkdir(parents=True, exist_ok=True)
-    fingerprint = save_dataset(args.output / "dataset.npz", transitions)
+    run = RunDirectory(args.output)
+    fingerprint = write_transitions_npz(run.dataset_path, transitions)
 
     task = TaskSpec(
         task_id=f"reach_{goal[0]}_{goal[1]}", settings={"goal_row": goal[0], "goal_col": goal[1]}
@@ -154,17 +147,20 @@ def main() -> None:
         "numpy": np.__version__,
         "torch": torch.__version__,
         "collection_seed": args.seed,
-        "dataset_file": "dataset.npz",
+        "dataset_file": run.dataset_path.name,
         "dataset_sha256": fingerprint,
     }
-    recorder = JsonlRunRecorder(args.output)
-    recorder.write_manifest(
+    run.write_manifest(
         RunManifest(run_id=run_id, experiment=spec, status="running", provenance=provenance)
     )
 
-    def evaluate(agent: DiscreteFBAgent, checkpoint_id: str, snapshot: str) -> EvaluationRecord:
+    def evaluate(agent: DiscreteFBAgent, checkpoint_id: str, phase: str) -> EvaluationRecord:
         condition = agent.goal_condition(goal_observation)
-        save_policy_snapshot(agent, eval_env, condition, args.output / snapshot)
+        snapshot = record_policy_snapshot(
+            agent, eval_env.positions, eval_env.observation_for, condition=condition
+        )
+        snapshot.require_action_space(DiscreteActionSpec(eval_env.num_actions))
+        run.write_policy_snapshot(phase, snapshot)
         record = evaluate_goal_policy(
             agent,
             eval_env,
@@ -176,10 +172,10 @@ def main() -> None:
             task_id=task.task_id,
             checkpoint_id=checkpoint_id,
             seed=args.seed + 100,
-            on_trajectory=recorder.write_trajectory if args.trajectories else None,
+            on_trajectory=run.write_trajectory if args.trajectories else None,
             max_trajectories=args.trajectories,
         )
-        recorder.write_evaluation(record)
+        run.write_evaluation(record)
         return record
 
     try:
@@ -193,21 +189,17 @@ def main() -> None:
             )
         )
         sampler = FBTransitionSampler(transitions, batch_size=args.batch_size, seed=args.seed + 2)
-        initial = evaluate(agent, "initial_in_memory", "policy_initial.npz")
+        initial = evaluate(agent, "initial_in_memory", "initial")
         training = train_updates(
             agent,
             sampler,
             updates=args.updates,
             run_id=run_id,
-            recorder=recorder,
+            recorder=run,
             log_every=max(1, args.updates // 10),
         )
-        # Trusted local-only torch checkpoint. Never torch.load an untrusted file.
-        torch.save(
-            {"agent": agent.state_dict(), "sampler": sampler.state_dict()},
-            args.output / "checkpoint.pt",
-        )
-        final = evaluate(agent, "checkpoint.pt", "policy_final.npz")
+        checkpoint = save_checkpoint(run.checkpoint_path, agent, sampler=sampler)
+        final = evaluate(agent, checkpoint.name, "final")
         artifacts = {
             "policy_initial": "policy_initial.npz",
             "policy_final": "policy_final.npz",
@@ -215,7 +207,7 @@ def main() -> None:
             "metric_file": "training_metrics.jsonl",
             "evaluation_file": "evaluations.jsonl",
         }
-        recorder.write_manifest(
+        run.write_manifest(
             RunManifest(
                 run_id=run_id,
                 experiment=spec,
@@ -225,7 +217,7 @@ def main() -> None:
             )
         )
     except Exception as exc:
-        recorder.write_manifest(
+        run.write_manifest(
             RunManifest(
                 run_id=run_id,
                 experiment=spec,

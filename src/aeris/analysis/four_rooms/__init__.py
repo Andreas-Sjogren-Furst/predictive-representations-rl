@@ -9,8 +9,6 @@ from .four_rooms import (
     analyze_saved_four_rooms_run,
     build_four_rooms_oracle,
     load_four_rooms_run,
-    load_policy_actions,
-    save_policy_snapshot,
 )
 
 __all__ = [
@@ -22,6 +20,4 @@ __all__ = [
     "analyze_saved_four_rooms_run",
     "build_four_rooms_oracle",
     "load_four_rooms_run",
-    "load_policy_actions",
-    "save_policy_snapshot",
 ]

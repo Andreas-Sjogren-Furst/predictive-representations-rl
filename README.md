@@ -49,8 +49,8 @@ src/aeris/
   agents/fb/       Discrete-action Forward-Backward agent, networks and batch sampler
   environments/    Four Rooms grid world
   experiments/     Generic collection, training and goal-evaluation loops
-  data/            JSON Lines run recorder
-  analysis/        Exact tabular baselines and run/checkpoint diagnostics (no plotting)
+  data/            Run directories (typed read/write of every artifact), file formats, run catalog
+  analysis/        Exact tabular baselines and run/checkpoint diagnostics (no file I/O, no plotting)
   visualization/   Optional Matplotlib figures from saved artifacts
 ```
 
