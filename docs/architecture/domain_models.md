@@ -76,7 +76,7 @@ spec = ExperimentSpec(
 config = spec.to_dict()  # pure JSON-compatible snapshot, no algorithm instantiated
 ```
 
-See [`examples/fb_four_rooms.py`](../../examples/fb_four_rooms.py) for a complete experiment specification.
+See `_experiment_spec` in [`workflows/four_rooms_training.py`](../../src/aeris/workflows/four_rooms_training.py) for a complete experiment specification.
 
 ## Acceptance of Step 2
 

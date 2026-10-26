@@ -25,7 +25,7 @@ The core package needs only NumPy. Optional extras:
 Train FB on Four Rooms and save a self-describing run directory:
 
 ```bash
-uv run python examples/fb_four_rooms.py --updates 250 --output runs/fb_four_rooms
+uv run aeris train four-rooms --updates 250 --output runs/fb_four_rooms
 ```
 
 Inspect the completed run without retraining:
@@ -40,8 +40,9 @@ uv run aeris analysis fb-checkpoint fb_four_rooms       # FB checkpoint vs exact
 
 A run can be named by its directory, its folder name under `runs/` (`--root` to change), or its
 unique `run_id`. Each command writes derived artifacts (`analysis/*.json`, `figures/*.png`) next to the original
-run and never changes it. `examples/discrete_fb_smoke.py` is a minimal training example without
-an environment.
+run and never changes it. The manifest records the full agent configuration, so a run is
+described by `manifest.json` alone. `examples/fb_four_rooms.py` shows the same workflow from Python,
+and `examples/discrete_fb_smoke.py` is a minimal training example without an environment.
 
 ## Package layout
 

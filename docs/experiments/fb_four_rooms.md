@@ -8,7 +8,7 @@ real discrete FB learner and a four-room grid-world environment.
 ```bash
 uv sync --extra fb-torch
 uv run --extra fb-torch pytest -q
-uv run --extra fb-torch python examples/fb_four_rooms.py --updates 250 --output runs/fb_four_rooms
+uv run --extra fb-torch aeris train four-rooms --updates 250 --output runs/fb_four_rooms
 ```
 
 To collect a *fixed* random replay dataset rather than using enumerated oracle
@@ -51,7 +51,7 @@ maze scores, nor proof of zero-shot generalization beyond this test case.
 - `experiments/evaluation.py`: generic agent actions → goal success metrics.
 - `data/run_directory.py`: `RunDirectory`, typed reading and writing of the manifest, metrics, evaluations, trajectories, policy snapshots and reports.
 - `data/artifacts.py`: NumPy formats for policy snapshots and the fingerprinted transition dataset.
-- `examples/fb_four_rooms.py`: **composition root**; selects FB and FourRooms.
+- `workflows/four_rooms_training.py`: **composition root**; selects FB and FourRooms, records the full agent configuration in the manifest. `aeris train four-rooms` and `examples/fb_four_rooms.py` both call it.
 
 The runner and evaluator never import FB or FourRooms. That is the first
 architectural interchangeability demonstration. Tests also exercise the runner

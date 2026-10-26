@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from aeris.agents.fb.reports import FBCheckpointReport
 from aeris.analysis.goal_policy import (
@@ -17,9 +18,10 @@ from aeris.domain.results import RunManifest
 from aeris.domain.task import TaskSpec
 from aeris.environments.four_rooms import FourRooms, Position
 
-# Run conventions written by examples/fb_four_rooms.py.
-SNAPSHOT_LABELS = ("initial", "final")
-TRAJECTORY_CHECKPOINTS = {"initial": "initial_in_memory", "final": "checkpoint.pt"}
+# Run conventions shared by training (four_rooms_training.py) and the analyses here:
+# each evaluation label names a policy snapshot and the checkpoint id it was evaluated as.
+EVALUATION_CHECKPOINTS = {"initial": "initial_in_memory", "final": "checkpoint.pt"}
+SNAPSHOT_LABELS = tuple(EVALUATION_CHECKPOINTS)
 
 RunRef = str | Path | RunDirectory
 
@@ -109,6 +111,7 @@ def diagnose_fb_checkpoint(run_ref: RunRef) -> FBCheckpointReport:
     run.env.require_full_coverage(transitions.iter_transitions())
     agent = load_agent(run.store.checkpoint_path)
     agent.config.spec.require_compatible(run.env.spec, consumer="FB checkpoint")
+    _require_recorded_config(run.manifest, asdict(agent.config))
     final_snapshot = run.store.read_policy_snapshot("final")
     if final_snapshot is not None:
         final_snapshot.require_action_space(run.env.spec.action)
@@ -123,6 +126,20 @@ def diagnose_fb_checkpoint(run_ref: RunRef) -> FBCheckpointReport:
     )
     run.store.write_report(report)
     return report
+
+
+def _require_recorded_config(manifest: RunManifest, config: dict[str, Any]) -> None:
+    """Refuse a checkpoint that contradicts the agent settings recorded in the manifest."""
+    recorded = manifest.experiment.agent.settings
+    mismatched = [
+        f"{key} (manifest {recorded[key]!r}, checkpoint {config.get(key)!r})"
+        for key in recorded
+        if key != "device" and recorded[key] != config.get(key)
+    ]
+    if mismatched:
+        raise ValueError(
+            "checkpoint does not match the run's agent settings: " + "; ".join(mismatched)
+        )
 
 
 def render_run_figures(run_ref: RunRef) -> tuple[Path, ...]:
@@ -149,7 +166,7 @@ def render_run_figures(run_ref: RunRef) -> tuple[Path, ...]:
             name = store.policy_snapshot_path(label).stem
             made.append(render_policy_map(snapshot, run.goal, output / f"{name}.png", name=name))
     trajectories = list(store.read_trajectories())
-    for label, checkpoint in TRAJECTORY_CHECKPOINTS.items():
+    for label, checkpoint in EVALUATION_CHECKPOINTS.items():
         first = next((t for t in trajectories if t.checkpoint_id == checkpoint), None)
         if first is not None:
             made.append(render_trajectory(first, run.goal, output / f"trajectory_{label}.png"))

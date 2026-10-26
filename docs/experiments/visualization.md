@@ -25,11 +25,11 @@ is **not** a new training algorithm or a paper replication.
 
 ## How to run
 
-Install plotting support in your project (see `PYPROJECT_SNIPPET.toml`).
+Plotting needs the `viz` extra.
 
 ```bash
 uv sync --extra fb-torch --extra viz
-uv run --extra fb-torch --extra viz python examples/fb_four_rooms.py \
+uv run --extra fb-torch --extra viz aeris train four-rooms \
     --dataset oracle --updates 250 --episodes 20 \
     --trajectories 3 --plots --output runs/fb_four_rooms_visual
 ```
