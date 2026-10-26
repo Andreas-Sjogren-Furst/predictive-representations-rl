@@ -40,6 +40,10 @@ def four_rooms(
     goal_col: Annotated[int, typer.Option(help="Evaluation goal column.")] = 9,
     representation_dim: Annotated[int, typer.Option(help="FB representation size d.")] = 32,
     hidden_dim: Annotated[int, typer.Option(help="Hidden units per FB network layer.")] = 128,
+    log_every: Annotated[
+        int | None,
+        typer.Option(help="Updates between logged losses (default: 100 points per run)."),
+    ] = None,
     plots: Annotated[
         bool, typer.Option("--plots", help="Plot the run afterwards ('viz').")
     ] = False,
@@ -61,6 +65,7 @@ def four_rooms(
             goal=(goal_row, goal_col),
             representation_dim=representation_dim,
             hidden_dim=hidden_dim,
+            log_every=log_every,
         )
         outcome = train_four_rooms_fb(settings)
     typer.echo(f"Trained run: {settings.run_id}")

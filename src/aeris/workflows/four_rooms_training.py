@@ -56,6 +56,7 @@ class FourRoomsFBTraining:
     goal: Position = (9, 9)
     representation_dim: int = 32
     hidden_dim: int = 128
+    log_every: int | None = None  # updates between logged metrics; default: 100 points per run
 
     def __post_init__(self) -> None:
         if self.dataset not in get_args(DatasetOrigin):
@@ -64,6 +65,8 @@ class FourRoomsFBTraining:
             require_int(name, getattr(self, name), minimum=1)
         for name in ("seed", "trajectories"):
             require_int(name, getattr(self, name))
+        if self.log_every is not None:
+            require_int("log_every", self.log_every, minimum=1)
         object.__setattr__(self, "output", Path(self.output))
 
     @property
@@ -164,7 +167,7 @@ def train_four_rooms_fb(settings: FourRoomsFBTraining) -> TrainingOutcome:
             updates=settings.updates,
             run_id=settings.run_id,
             recorder=run,
-            log_every=max(1, settings.updates // 10),
+            log_every=settings.log_every or max(1, settings.updates // 100),
         )
         save_checkpoint(run.checkpoint_path, agent, sampler=sampler)
         final = evaluate(agent, "final")
