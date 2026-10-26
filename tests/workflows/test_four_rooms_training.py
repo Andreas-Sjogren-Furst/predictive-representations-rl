@@ -44,10 +44,15 @@ def test_train_then_inspect_with_the_cli(tmp_path):
     }
 
 
-def test_manifest_records_the_full_agent_config(tmp_path):
+def test_manifest_records_the_full_agent_config_and_code_revision(tmp_path):
+    from aeris.workflows.provenance import code_revision
+
     outcome = train_four_rooms_fb(FourRoomsFBTraining(output=tmp_path / "run", **TINY))
-    settings = outcome.run.read_manifest().experiment.agent.settings
+    manifest = outcome.run.read_manifest()
+    settings = manifest.experiment.agent.settings
     assert DiscreteFBConfig(**settings) == load_agent(outcome.run.checkpoint_path).config
+    assert manifest.provenance["git_commit"] == code_revision()["git_commit"]
+    assert "git_dirty" in manifest.provenance
 
 
 def test_refuses_a_nonempty_output_directory(tmp_path):

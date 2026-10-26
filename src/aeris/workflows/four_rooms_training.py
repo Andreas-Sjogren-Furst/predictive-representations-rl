@@ -35,6 +35,7 @@ from aeris.experiments import (
     train_updates,
 )
 from aeris.workflows.four_rooms import EVALUATION_CHECKPOINTS
+from aeris.workflows.provenance import code_revision
 
 DatasetOrigin = Literal["oracle", "random"]
 
@@ -82,8 +83,10 @@ class TrainingOutcome:
 def train_four_rooms_fb(settings: FourRoomsFBTraining) -> TrainingOutcome:
     """Collect fixed data, train FB offline, evaluate before and after, save everything.
 
-    The manifest records the full agent configuration, the dataset fingerprint
-    and the status; a failure after the run starts is recorded as ``failed``.
+    The manifest records the full agent configuration, the dataset fingerprint,
+    library versions, the AERIS git commit (and whether the checkout had
+    uncommitted changes) and the status; a failure after the run starts is
+    recorded as ``failed``.
     """
     import torch
 
@@ -114,6 +117,7 @@ def train_four_rooms_fb(settings: FourRoomsFBTraining) -> TrainingOutcome:
         "source": "AERIS demo, not Touati paper reproduction",
         "numpy": np.__version__,
         "torch": torch.__version__,
+        **code_revision(),
         "collection_seed": settings.seed,
         "dataset_file": run.dataset_path.name,
         "dataset_sha256": fingerprint,

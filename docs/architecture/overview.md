@@ -79,7 +79,8 @@ flowchart LR
 ```
 
 1. **Train.** `train_four_rooms_fb` builds the fixed dataset, writes the manifest (status `running`,
-   full agent configuration, dataset fingerprint, library versions), evaluates and snapshots the
+   full agent configuration, dataset fingerprint, library versions, AERIS git commit and whether
+   the checkout had uncommitted changes), evaluates and snapshots the
    initial policy, trains, saves the checkpoint, evaluates again and marks the manifest `completed`
    (or `failed` with the error).
 2. **Inspect.** `aeris runs list/show` read manifests and metric streams without importing any
@@ -134,5 +135,6 @@ Not implemented yet, so the specification's rules hold only partly:
   workflow rather than one configured execution path (rule R2), and there is no component registry.
 - **Online and hybrid training**, **zero-shot task inference** (`TaskConditioner` exists but no
   workflow uses it) and **resuming** from a checkpoint (sampler state is saved, but nothing restores it).
-- **Provenance** records library versions and the dataset fingerprint, but not the code revision
-  (git commit) or hardware (rule R7).
+- **Provenance** records library versions, the dataset fingerprint and the AERIS git commit with a
+  dirty flag (`aeris train` warns when the checkout has uncommitted changes), but not the diff of
+  those changes or the hardware (rule R7).

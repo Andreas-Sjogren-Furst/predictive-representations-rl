@@ -71,6 +71,14 @@ def four_rooms(
         metrics = ", ".join(f"{m.name}={m.value:.4g}" for m in record.metrics)
         typer.echo(f"  {label}: {metrics}")
     typer.echo(f"Run: {outcome.run.root}")
+    provenance = outcome.run.read_manifest().provenance
+    if provenance.get("git_commit") is None:
+        typer.echo("  note: not a git checkout, so no code revision was recorded")
+    elif provenance.get("git_dirty"):
+        typer.echo(
+            "  warning: AERIS had uncommitted changes; the recorded commit "
+            f"{provenance['git_commit'][:12]} does not fully identify the code"
+        )
     # Plotting runs after the manifest is completed: a rendering failure must
     # never mark a successfully trained run as failed.
     if plots:

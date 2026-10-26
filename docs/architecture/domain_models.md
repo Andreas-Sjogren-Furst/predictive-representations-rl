@@ -55,7 +55,7 @@ validation. Consumers therefore receive valid objects and do not re-validate raw
 
 ### Results and scientific interpretation
 
-- `RunManifest` is a container for a complete configuration snapshot and provenance. The training workflow records the full agent configuration, the dataset fingerprint, library versions and a `running`/`completed`/`failed` status; the code revision and hardware are not recorded yet. Constructing an empty-provenance manifest is not certification of reproducibility.
+- `RunManifest` is a container for a complete configuration snapshot and provenance. The training workflow records the full agent configuration, the dataset fingerprint, library versions, the AERIS git commit with a `git_dirty` flag (both `null` outside a git checkout; see `workflows/provenance.py`) and a `running`/`completed`/`failed` status; hardware is not recorded yet. Constructing an empty-provenance manifest is not certification of reproducibility.
 - `EvaluationRecord` represents the result of one task, evaluated at one checkpoint using a named protocol and seed. The `inference_evidence` field contains a typed source/split reference for permitted evidence provenance; it must not be filled from secret evaluation rollouts.
 - `MetricValue` explicitly records its unit and aggregation (e.g. `fraction` and `mean`). Equal metric names alone are **not** sufficient for cross-environment comparisons; protocol, task semantics, normalization and environment identity also matter.
 - Training metrics, evaluations, trajectories, policy snapshots and reports are stored by `data.RunDirectory` (layout in the [overview](overview.md#life-of-a-run)). Videos, representation dumps and checkpoint resume are not implemented.
