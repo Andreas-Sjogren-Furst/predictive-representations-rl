@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from aeris.agents.fb.reports import FBCheckpointReport
 from aeris.analysis.goal_policy import (
@@ -14,9 +17,12 @@ from aeris.analysis.goal_policy import (
 )
 from aeris.data.artifacts import TransitionFile
 from aeris.data.run_directory import RunDirectory
+from aeris.domain.reports import ZeroShotOutcome, ZeroShotReport, ZeroShotTaskResult
 from aeris.domain.results import RunManifest
-from aeris.domain.task import TaskSpec
+from aeris.domain.task import TaskEvidenceRef, TaskSpec
+from aeris.domain.validation import require_int
 from aeris.environments.four_rooms import FourRooms, Position
+from aeris.experiments.zero_shot import evaluate_zero_shot
 
 # Run conventions shared by training (four_rooms_training.py) and the analyses here:
 # each evaluation label names a policy snapshot and the checkpoint id it was evaluated as.
@@ -128,6 +134,118 @@ def diagnose_fb_checkpoint(run_ref: RunRef) -> FBCheckpointReport:
     return report
 
 
+ZERO_SHOT_EVIDENCE = {
+    "goal_observation": (
+        "one sample, the goal observation with reward 1; privileged (it names the goal state) "
+        "and, for FB, equal to conditioning on B(goal)"
+    ),
+    "dataset_rewards": (
+        "the run's reward-free pretraining observations relabelled with the task reward "
+        "r(s) = 1 if s is the goal else 0; the zero-shot setting"
+    ),
+}
+
+
+def evaluate_zero_shot_goals(
+    run_ref: RunRef,
+    *,
+    goals: Sequence[Position] | None = None,
+    samples: int | None = None,
+    episodes: int = 10,
+    seed: int = 0,
+) -> ZeroShotReport:
+    """Infer each goal task from evidence, then evaluate the frozen policy (needs torch).
+
+    For every goal (default: every traversable cell) and every protocol in
+    ``ZERO_SHOT_EVIDENCE`` the agent infers its condition through the
+    TaskConditioner contract and is evaluated on the same seeded start states.
+    ``samples`` draws a fixed random subset of the pretraining observations as
+    the relabelled evidence (default: all of them). Inference never sees
+    evaluation rollouts, and the agent is never updated. Saves
+    ``analysis/zero_shot_goals_v1.json``.
+    """
+    from aeris.agents.fb.checkpoint import load_agent
+
+    run = open_four_rooms_run(run_ref)
+    dataset_spec = run.manifest.experiment.dataset
+    if dataset_spec is None:
+        raise ValueError("zero-shot evidence needs the run's saved pretraining dataset")
+    fingerprint = dataset_spec.settings.get("sha256")
+    dataset = TransitionFile(run.store.dataset_path, expected_sha256=fingerprint)
+    agent = load_agent(run.store.checkpoint_path)
+    agent.config.spec.require_compatible(run.env.spec, consumer="FB checkpoint")
+    _require_recorded_config(run.manifest, asdict(agent.config))
+
+    observations = dataset.observations
+    if samples is not None:
+        require_int("samples", samples, minimum=1)
+        if samples > len(observations):
+            raise ValueError(f"samples must be at most the dataset size ({len(observations)})")
+        chosen = np.random.default_rng(seed).choice(len(observations), size=samples, replace=False)
+        observations = observations[np.sort(chosen)]
+    sample_states = [run.env.position_of(obs) for obs in observations]
+    eval_env = FourRooms(max_episode_steps=run.max_steps)
+    evidence_source = f"{run.store.dataset_path.name} sha256:{fingerprint}"
+    checkpoint = run.store.checkpoint_path.name
+
+    tasks = []
+    for goal in goals if goals is not None else run.env.positions:
+        task = run.env.goal_task(goal)
+        goal_obs = run.env.observation_for(goal)
+        rewards = [1.0 if state == goal else 0.0 for state in sample_states]
+        evidence = {
+            "goal_observation": [(goal_obs, 1.0)],
+            "dataset_rewards": list(zip(observations, rewards, strict=True)),
+        }
+        outcomes = {}
+        for name, pairs in evidence.items():
+            record = evaluate_zero_shot(
+                agent,
+                eval_env,
+                task=task,
+                evidence=pairs,
+                evidence_ref=TaskEvidenceRef(source_id=evidence_source, split=name),
+                is_goal=_reaches(goal_obs),
+                episodes=episodes,
+                max_steps=run.max_steps,
+                run_id=run.manifest.run_id,
+                checkpoint_id=checkpoint,
+                seed=seed,
+            )
+            metrics = {m.name: m.value for m in record.metrics}
+            outcomes[name] = ZeroShotOutcome(
+                evidence_samples=len(pairs),
+                rewarded_samples=sum(1 for _, r in pairs if r != 0),
+                success_rate=metrics["success_rate"],
+                mean_episode_length=metrics["mean_episode_length"],
+            )
+        tasks.append(ZeroShotTaskResult(task_id=task.task_id, goal=goal, outcomes=outcomes))
+
+    report = ZeroShotReport(
+        run_id=run.manifest.run_id,
+        checkpoint=checkpoint,
+        evidence_source=evidence_source,
+        evidence_protocols=ZERO_SHOT_EVIDENCE,
+        episodes=episodes,
+        max_steps=run.max_steps,
+        seed=seed,
+        tasks=tuple(tasks),
+        mean_success_rate={
+            name: float(np.mean([t.outcomes[name].success_rate for t in tasks]))
+            for name in ZERO_SHOT_EVIDENCE
+        },
+    )
+    run.store.write_report(report)
+    return report
+
+
+def _reaches(goal_observation: np.ndarray) -> Callable[[Any], bool]:
+    def is_goal(observation: Any) -> bool:
+        return bool(np.array_equal(observation, goal_observation))
+
+    return is_goal
+
+
 def _require_recorded_config(manifest: RunManifest, config: dict[str, Any]) -> None:
     """Refuse a checkpoint that contradicts the agent settings recorded in the manifest."""
     recorded = manifest.experiment.agent.settings
@@ -186,3 +304,11 @@ def render_fb_figures(run_ref: RunRef, report: FBCheckpointReport) -> tuple[Path
 
     path = _store(run_ref).figures_dir / "fb_action_alignment.png"
     return (render_fb_action_alignment(report, path),)
+
+
+def render_zero_shot_figures(run_ref: RunRef, report: ZeroShotReport) -> tuple[Path, ...]:
+    """Plot per-goal zero-shot success maps into ``figures/``."""
+    from aeris.visualization.zero_shot import render_zero_shot_success
+
+    path = _store(run_ref).figures_dir / "zero_shot_success.png"
+    return (render_zero_shot_success(report, path),)

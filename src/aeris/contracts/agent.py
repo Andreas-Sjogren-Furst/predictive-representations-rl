@@ -29,3 +29,8 @@ class Checkpointable(Protocol):
 @runtime_checkable
 class TaskConditioner(Protocol[EvidenceT]):
     def infer_condition(self, task: TaskSpec, evidence: EvidenceT) -> Any: ...
+
+
+@runtime_checkable
+class ZeroShotAgent(Agent, TaskConditioner[EvidenceT], Protocol[EvidenceT]):
+    """An agent that acts on a condition it infers from task evidence, without learning."""

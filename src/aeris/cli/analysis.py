@@ -74,3 +74,51 @@ def fb_checkpoint(run: RunArg, root: RootOpt = DEFAULT_ROOT, no_plots: NoPlotsOp
 
 def _maybe(value: float | None) -> str:
     return "undefined (no variation)" if value is None else f"{value:.3f}"
+
+
+def _parse_goal(text: str) -> tuple[int, int]:
+    try:
+        row, col = (int(part) for part in text.split(","))
+    except ValueError as exc:
+        raise typer.BadParameter(f"expected ROW,COL such as 9,9, got {text!r}") from exc
+    return row, col
+
+
+@app.command("zero-shot")
+def zero_shot(
+    run: RunArg,
+    root: RootOpt = DEFAULT_ROOT,
+    goal: Annotated[
+        list[str] | None,
+        typer.Option("--goal", help="Goal cell ROW,COL; repeat for several (default: every cell)."),
+    ] = None,
+    samples: Annotated[
+        int | None,
+        typer.Option(
+            help="Random pretraining observations used as reward evidence (default: all)."
+        ),
+    ] = None,
+    episodes: Annotated[int, typer.Option(help="Evaluation episodes per goal and protocol.")] = 10,
+    seed: Annotated[int, typer.Option(help="Seed for start states and evidence sampling.")] = 0,
+    no_plots: NoPlotsOpt = False,
+) -> None:
+    """Infer each goal task from evidence and evaluate the frozen FB policy (needs 'fb-torch')."""
+    from aeris.workflows.four_rooms import evaluate_zero_shot_goals, render_zero_shot_figures
+
+    goals = [_parse_goal(text) for text in goal] if goal else None
+    with cli_errors():
+        store = resolve_run(run, root=root)
+        report = evaluate_zero_shot_goals(
+            store, goals=goals, samples=samples, episodes=episodes, seed=seed
+        )
+        figures = () if no_plots else render_zero_shot_figures(store, report)
+    typer.echo(
+        f"Zero-shot evaluation: {report.run_id} / {report.checkpoint}, {len(report.tasks)} goals"
+    )
+    for protocol, rate in report.mean_success_rate.items():
+        invisible = sum(1 for t in report.tasks if t.outcomes[protocol].rewarded_samples == 0)
+        goals_word = "goal" if invisible == 1 else "goals"
+        note = f" ({invisible} {goals_word} had no rewarded evidence)" if invisible else ""
+        typer.echo(f"  {protocol}: mean success {rate:.1%}{note}")
+    typer.echo(f"Report: {store.report_path(type(report))}")
+    _echo_paths("Figure", figures)

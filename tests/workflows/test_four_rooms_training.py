@@ -93,3 +93,49 @@ def test_diagnostic_refuses_a_checkpoint_from_another_configuration(tmp_path):
     save_checkpoint(outcome.run.checkpoint_path, DiscreteFBAgent(other))
     with pytest.raises(ValueError, match="hidden_dim .manifest 128, checkpoint 64."):
         diagnose_fb_checkpoint(outcome.run)
+
+
+def test_zero_shot_privileged_protocol_reproduces_the_training_evaluation(tmp_path):
+    from aeris.domain import ZeroShotReport
+    from aeris.workflows.four_rooms import evaluate_zero_shot_goals
+
+    settings = FourRoomsFBTraining(output=tmp_path / "run", **TINY)
+    outcome = train_four_rooms_fb(settings)
+    # Same goal, episodes and evaluation seeds (seed + 100) as training's final evaluation.
+    report = evaluate_zero_shot_goals(
+        outcome.run, goals=[settings.goal], episodes=settings.episodes, seed=settings.seed + 100
+    )
+    final = {m.name: m.value for m in outcome.final.metrics}
+    privileged = report.tasks[0].outcomes["goal_observation"]
+    assert (privileged.success_rate, privileged.mean_episode_length) == (
+        final["success_rate"],
+        final["mean_episode_length"],
+    )
+    zero_shot = report.tasks[0].outcomes["dataset_rewards"]
+    assert zero_shot.evidence_samples == 272 and zero_shot.rewarded_samples == 4
+    assert outcome.run.read_report(ZeroShotReport) == report
+
+
+def test_zero_shot_evidence_subsample(tmp_path):
+    from aeris.workflows.four_rooms import evaluate_zero_shot_goals
+
+    outcome = train_four_rooms_fb(FourRoomsFBTraining(output=tmp_path / "run", **TINY))
+    report = evaluate_zero_shot_goals(outcome.run, goals=[(1, 1), (9, 9)], samples=10, episodes=1)
+    assert {t.outcomes["dataset_rewards"].evidence_samples for t in report.tasks} == {10}
+    with pytest.raises(ValueError, match="at most the dataset size"):
+        evaluate_zero_shot_goals(outcome.run, goals=[(1, 1)], samples=10_000, episodes=1)
+
+
+def test_zero_shot_cli_and_figure(tmp_path):
+    pytest.importorskip("matplotlib")
+    out = tmp_path / "run"
+    train_four_rooms_fb(FourRoomsFBTraining(output=out, **TINY))
+    result = runner.invoke(
+        app,
+        ["analysis", "zero-shot", str(out), "--goal", "9,9", "--goal", "1,1", "--episodes", "1"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "dataset_rewards: mean success" in result.output
+    assert (out / "figures" / "zero_shot_success.png").stat().st_size > 1000
+    bad = runner.invoke(app, ["analysis", "zero-shot", str(out), "--goal", "9"])
+    assert bad.exit_code != 0 and "ROW,COL" in bad.output

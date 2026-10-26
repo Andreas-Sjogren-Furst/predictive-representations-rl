@@ -36,6 +36,7 @@ uv run aeris runs show fb_four_rooms                    # manifest and latest me
 uv run aeris runs plot fb_four_rooms                    # figures/*.png from recorded artifacts
 uv run aeris analysis four-rooms fb_four_rooms          # saved policies vs the exact optimal policy
 uv run aeris analysis fb-checkpoint fb_four_rooms       # FB checkpoint vs exact occupancies
+uv run aeris analysis zero-shot fb_four_rooms           # infer every goal task from reward evidence
 ```
 
 A run can be named by its directory, its folder name under `runs/` (`--root` to change), or its
@@ -83,4 +84,4 @@ that a component really satisfies one.
 - [Domain models](docs/architecture/domain_models.md), [component contracts](docs/architecture/component_contracts.md), and the founding [experiment lifecycle](docs/architecture/experiment_lifecycle.md) specification
 - [Discrete FB algorithm](docs/algorithms/discrete_fb.md)
 - [Four Rooms experiment](docs/experiments/fb_four_rooms.md) and [visualization](docs/experiments/visualization.md)
-- [Tabular policy analysis](docs/analysis/tabular_policy.md) and [FB checkpoint analysis](docs/analysis/fb_checkpoint.md)
+- [Tabular policy analysis](docs/analysis/tabular_policy.md), [FB checkpoint analysis](docs/analysis/fb_checkpoint.md) and [zero-shot goal reaching](docs/analysis/zero_shot.md)

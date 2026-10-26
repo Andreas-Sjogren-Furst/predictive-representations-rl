@@ -9,7 +9,15 @@ from .experiment import (
     ExperimentSpec,
     TrainingPlan,
 )
-from .reports import AnalysisReport, PolicySummary, SnapshotReport, TabularPolicyReport
+from .reports import (
+    AnalysisReport,
+    PolicySummary,
+    SnapshotReport,
+    TabularPolicyReport,
+    ZeroShotOutcome,
+    ZeroShotReport,
+    ZeroShotTaskResult,
+)
 from .results import EvaluationRecord, MetricValue, RunManifest, TrainingMetricRecord
 from .spaces import DiscreteActionSpec, ObservationSpec, SpaceSpec
 from .task import TaskEvidenceRef, TaskSpec
@@ -42,4 +50,7 @@ __all__ = [
     "TrainingPlan",
     "TrajectoryStep",
     "Transition",
+    "ZeroShotOutcome",
+    "ZeroShotReport",
+    "ZeroShotTaskResult",
 ]

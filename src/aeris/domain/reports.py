@@ -66,3 +66,64 @@ class TabularPolicyReport(AnalysisReport):
         if not self.snapshots:
             raise ValueError("a tabular policy report needs at least one snapshot")
         object.__setattr__(self, "snapshots", MappingProxyType(dict(self.snapshots)))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ZeroShotOutcome:
+    """Evaluation of one task with a condition inferred from one kind of evidence."""
+
+    evidence_samples: int
+    rewarded_samples: int  # samples with nonzero reward; 0 means the task was invisible
+    success_rate: float
+    mean_episode_length: float
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ZeroShotTaskResult:
+    task_id: str
+    goal: tuple[int, ...]
+    outcomes: Mapping[str, ZeroShotOutcome]  # keyed by evidence protocol
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "outcomes", MappingProxyType(dict(self.outcomes)))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ZeroShotReport(AnalysisReport):
+    """Goal-reaching success when the task condition is inferred, per evidence protocol.
+
+    All protocols use the same evaluation seeds, so start states are paired
+    and success rates can be compared task by task.
+    """
+
+    ARTIFACT_NAME: ClassVar[str] = "zero_shot_goals_v1.json"
+
+    schema_version: int = 1
+    analysis: str = "zero_shot_goal_reaching_v1"
+    run_id: str
+    checkpoint: str
+    evidence_source: str
+    evidence_protocols: Mapping[str, str]  # name -> definition
+    episodes: int
+    max_steps: int
+    seed: int
+    tasks: tuple[ZeroShotTaskResult, ...]
+    mean_success_rate: Mapping[str, float]  # per protocol, uniform over tasks
+
+    def __post_init__(self) -> None:
+        require_identifier("run_id", self.run_id)
+        require_int("episodes", self.episodes, minimum=1)
+        require_int("max_steps", self.max_steps, minimum=1)
+        if not self.tasks:
+            raise ValueError("a zero-shot report needs at least one task")
+        protocols = set(self.evidence_protocols)
+        if any(set(task.outcomes) != protocols for task in self.tasks):
+            raise ValueError("every task needs one outcome per evidence protocol")
+        if set(self.mean_success_rate) != protocols:
+            raise ValueError("mean_success_rate needs one entry per evidence protocol")
+        object.__setattr__(
+            self, "evidence_protocols", MappingProxyType(dict(self.evidence_protocols))
+        )
+        object.__setattr__(
+            self, "mean_success_rate", MappingProxyType(dict(self.mean_success_rate))
+        )

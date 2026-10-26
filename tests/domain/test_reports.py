@@ -81,3 +81,41 @@ def test_fb_report_requires_one_entry_per_state():
 def test_fb_report_does_not_import_torch():
     code = "import sys, aeris.agents.fb.reports; assert 'torch' not in sys.modules"
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def zero_shot_report(**overrides):
+    from aeris.domain import ZeroShotOutcome, ZeroShotReport, ZeroShotTaskResult
+
+    outcome = ZeroShotOutcome(
+        evidence_samples=4, rewarded_samples=1, success_rate=0.5, mean_episode_length=10.0
+    )
+    values = dict(
+        run_id="run",
+        checkpoint="checkpoint.pt",
+        evidence_source="dataset.npz sha256:abc",
+        evidence_protocols={"a": "first", "b": "second"},
+        episodes=2,
+        max_steps=10,
+        seed=0,
+        tasks=(
+            ZeroShotTaskResult(
+                task_id="reach_9_9", goal=(9, 9), outcomes={"a": outcome, "b": outcome}
+            ),
+        ),
+        mean_success_rate={"a": 0.5, "b": 0.5},
+    )
+    return ZeroShotReport(**{**values, **overrides})
+
+
+def test_zero_shot_report_roundtrips():
+    from aeris.domain import ZeroShotReport
+
+    report = zero_shot_report()
+    assert ZeroShotReport.from_dict(json.loads(json.dumps(report.to_dict()))) == report
+
+
+def test_zero_shot_report_needs_every_protocol_everywhere():
+    with pytest.raises(ValueError, match="one entry per evidence protocol"):
+        zero_shot_report(mean_success_rate={"a": 0.5})
+    with pytest.raises(ValueError, match="at least one task"):
+        zero_shot_report(tasks=())

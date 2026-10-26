@@ -162,3 +162,10 @@ def test_invalid_action_and_shape_rejected():
                 b.observations, b.actions, b.next_observations[:, :-1], b.comparison_observations
             )
         )
+
+
+def test_single_rewarded_goal_sample_infers_exactly_the_goal_condition():
+    a = agent()
+    goal = np.array([0.5, -1.0, 2.0, 0.0], dtype=np.float32)
+    inferred = a.infer_condition(TaskSpec(task_id="goal"), [(goal, 1.0)])
+    assert torch.equal(inferred, a.goal_condition(goal))

@@ -9,6 +9,7 @@ from aeris.contracts.agent import Agent
 from aeris.contracts.environment import Environment
 from aeris.domain.agent import ActionRequest
 from aeris.domain.results import EvaluationRecord, MetricValue
+from aeris.domain.task import TaskEvidenceRef
 from aeris.domain.trajectory import EvaluationTrajectory, TrajectoryStep
 from aeris.domain.validation import require_int
 
@@ -28,9 +29,12 @@ def evaluate_goal_policy(
     protocol_id: str = "goal_reaching_v1",
     on_trajectory: Callable[[EvaluationTrajectory], None] | None = None,
     max_trajectories: int | None = None,
+    inference_evidence: TaskEvidenceRef | None = None,
 ) -> EvaluationRecord:
     """Evaluate a fixed policy condition, optionally emitting selected episodes.
 
+    ``inference_evidence`` names the evidence a task condition was inferred
+    from, so the record shows which zero-shot protocol produced it.
     The callback only observes completed evaluation episodes; it never changes
     the policy and is never used as task-inference evidence. For large visual
     observations, avoid JSONL capture (use a binary artifact adapter later).
@@ -105,6 +109,7 @@ def evaluate_goal_policy(
         protocol_id=protocol_id,
         seed=seed,
         episode_count=episodes,
+        inference_evidence=inference_evidence,
         metrics=(
             MetricValue(
                 name="success_rate", value=successes / episodes, unit="fraction", aggregation="mean"

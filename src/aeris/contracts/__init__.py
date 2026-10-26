@@ -1,4 +1,4 @@
-from .agent import Agent, Checkpointable, TaskConditioner, TrainableAgent
+from .agent import Agent, Checkpointable, TaskConditioner, TrainableAgent, ZeroShotAgent
 from .dataset import BatchProvider, TransitionSource
 from .environment import Environment, TabularModel, TransitionTable
 from .recorder import ArtifactStore, RunReader, RunRecorder, TrajectoryRecorder
@@ -16,5 +16,6 @@ __all__ = [
     "TrainableAgent",
     "TrajectoryRecorder",
     "TransitionTable",
+    "ZeroShotAgent",
     "TransitionSource",
 ]

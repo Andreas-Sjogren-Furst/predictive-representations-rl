@@ -26,6 +26,7 @@ The contracts use `typing.Protocol` for structural compatibility. The runtime `i
 | | `TrainableAgent[BatchT]` | `update(batch) -> tuple[MetricValue, ...]` | Constructing data from a particular dataset; choosing training cadence |
 | | `Checkpointable` | Supply/restore opaque learning state | Picking checkpoint paths or writing files |
 | | `TaskConditioner[EvidenceT]` | Infer a policy condition from authorized evidence | Obtaining hidden evaluation rewards; updating weights |
+| | `ZeroShotAgent[EvidenceT]` | `Agent` + `TaskConditioner`: what zero-shot evaluation needs | Learning during evaluation |
 | `contracts/environment.py` | `Environment` | `reset`, `step`, `close` | Choosing agent actions or computing analysis metrics |
 | | `TabularModel` | Expose `spec`, exact `tabular_dynamics()`, `observation_for(state)` and the environment's goal-task format, for oracle analyses only | Being used by learning code |
 | | `TransitionTable` | Enumerated states and an integer successor table (implemented by `environments.tabular.TabularDynamics`) | Rewards or task definitions (see `TabularMDP`) |
@@ -85,7 +86,7 @@ Tests verify discrete/simple vector observations, toy reward-free environment st
 ## Open design questions
 
 1. **Richer spaces and a resolver.** `SpaceSpec` covers flat observations and discrete actions. Continuous actions (needed for one-step FB and TD-JEPA on continuous control) and a resolver that checks a whole experiment spec before training are open.
-2. **Task inference evidence.** A resolved evidence view (reward-labeled samples, demonstrations, or something else) must be permission-scoped, with explicit provenance; `TaskConditioner` alone cannot prevent evaluation leakage. No workflow uses task inference yet.
+2. **Task inference evidence.** `experiments.evaluate_zero_shot` infers a condition from supplied evidence through `ZeroShotAgent` (`Agent` + `TaskConditioner`) and records the evidence as a `TaskEvidenceRef` on the `EvaluationRecord`. The Four Rooms workflow builds evidence only from the pretraining dataset (or a privileged goal sample, labelled as such), never from evaluation rollouts. A general, permission-scoped evidence view (demonstrations, held-out reward splits) is still open; the contract alone cannot prevent leakage.
 3. **Large artifacts.** Trajectories are JSON Lines, suited to small observations; image observations, videos and representation dumps need a binary artifact format.
 4. **Training strategies.** Batch construction and update cadence live in per-experiment training workflows; a reusable strategy abstraction should wait until a second training workflow (online, or another algorithm) shows what is common.
 5. **Resume.** Agent and sampler state are checkpointed, but restoring a run mid-training is not implemented.
