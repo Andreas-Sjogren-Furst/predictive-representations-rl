@@ -7,22 +7,28 @@ Coordinates are (row, column). Actions: 0=up, 1=down, 2=left, 3=right.
 
 from __future__ import annotations
 
-from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
+from functools import cached_property
 from typing import Any
 
 import numpy as np
 
 from aeris.domain.environment import ResetResult, StepResult
 from aeris.domain.experience import Transition
+from aeris.domain.spaces import DiscreteActionSpec, ObservationSpec, SpaceSpec
+from aeris.domain.task import TaskSpec
 from aeris.domain.validation import require_int
+from aeris.environments.tabular import TabularDynamics
+
+Position = tuple[int, int]
 
 
 class FourRooms:
-    """Small tabular environment with AERIS environment contract.
+    """Small tabular environment implementing the Environment and TabularModel contracts.
 
     The observation is always a 121-dimensional one-hot vector. Reward is
     intentionally None: goal rewards are defined only by evaluation tasks.
+    States of the exact model are the traversable ``positions``.
     """
 
     WIDTH = 11
@@ -122,24 +128,54 @@ class FourRooms:
                     next_observation=self.observation_for(self.next_position(pos, action)),
                 )
 
-    def shortest_distance(self, start: tuple[int, int], goal: tuple[int, int]) -> int:
-        """Exact tabular oracle distance for later diagnostic comparisons."""
-        self._check_position(start)
+    def shortest_distance(self, start: Position, goal: Position) -> int:
+        """Exact tabular oracle distance for diagnostic comparisons."""
+        dynamics = self.tabular_dynamics()
+        return int(
+            dynamics.shortest_path_lengths(dynamics.index_of(goal))[dynamics.index_of(start)]
+        )
+
+    # Exact model and task conventions (TabularModel contract)
+    @property
+    def spec(self) -> SpaceSpec:
+        return SpaceSpec(
+            ObservationSpec(self.observation_dim), DiscreteActionSpec(self.num_actions)
+        )
+
+    def tabular_dynamics(self) -> TabularDynamics:
+        return self._dynamics
+
+    @cached_property
+    def _dynamics(self) -> TabularDynamics:
+        index = {pos: i for i, pos in enumerate(self.positions)}
+        table = [
+            [index[self.next_position(pos, a)] for a in range(self.num_actions)]
+            for pos in self.positions
+        ]
+        return TabularDynamics(self.positions, np.asarray(table, dtype=np.int64))
+
+    def goal_task(self, goal: Position) -> TaskSpec:
+        """The evaluation task "reach ``goal``", in the settings format this environment reads."""
         self._check_position(goal)
-        if start == goal:
-            return 0
-        queue: deque[tuple[tuple[int, int], int]] = deque([(start, 0)])
-        visited = {start}
-        while queue:
-            position, dist = queue.popleft()
-            for action in range(self.num_actions):
-                nxt = self.next_position(position, action)
-                if nxt == goal:
-                    return dist + 1
-                if nxt not in visited:
-                    visited.add(nxt)
-                    queue.append((nxt, dist + 1))
-        raise RuntimeError("goal is unreachable: invalid four-room layout")
+        return TaskSpec(
+            task_id=f"reach_{goal[0]}_{goal[1]}",
+            settings={"goal_row": goal[0], "goal_col": goal[1]},
+        )
+
+    def goal_from_task(self, task: TaskSpec) -> Position:
+        try:
+            goal = (int(task.settings["goal_row"]), int(task.settings["goal_col"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"task {task.task_id!r} has no Four Rooms goal_row/goal_col") from exc
+        self._check_position(goal)
+        return goal
+
+    def require_full_coverage(self, transitions: Iterable[Transition]) -> None:
+        """Require exactly one correct one-step sample for every state-action pair."""
+        self.tabular_dynamics().require_full_coverage(
+            (self.position_of(t.observation), t.action, self.position_of(t.next_observation))
+            for t in transitions
+        )
 
     def close(self) -> None:
         pass

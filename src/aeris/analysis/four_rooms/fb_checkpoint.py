@@ -16,7 +16,6 @@ from aeris.analysis.four_rooms.four_rooms import build_four_rooms_oracle, load_f
 from aeris.analysis.tabular_occupancy import centered_pearson, exact_discounted_occupancy
 from aeris.data.artifacts import TransitionFile
 from aeris.data.run_directory import RunDirectory
-from aeris.domain.spaces import DiscreteActionSpec
 from aeris.environments import FourRooms
 
 
@@ -28,25 +27,6 @@ def _effective_rank(matrix: np.ndarray) -> float:
         return 0.0
     p = eig[eig > 0] / eig.sum()
     return float(np.exp(-(p * np.log(p)).sum()))
-
-
-def _require_full_coverage(dataset: TransitionFile, env: FourRooms) -> None:
-    """Verify uniform state-action coverage instead of trusting a dataset label."""
-    needed = len(env.positions) * env.num_actions
-    if len(dataset) != needed or dataset.observations.shape[1] != env.observation_dim:
-        raise ValueError("oracle dataset must contain exactly one sample per state-action")
-    observed = set()
-    for transition in dataset.iter_transitions():
-        pos = env.position_of(transition.observation)
-        if not 0 <= transition.action < env.num_actions:
-            raise ValueError("oracle dataset contains invalid action")
-        if env.position_of(transition.next_observation) != env.next_position(
-            pos, transition.action
-        ):
-            raise ValueError("oracle dataset contains incorrect transition")
-        observed.add((pos, transition.action))
-    if len(observed) != needed:
-        raise ValueError("oracle dataset contains duplicate or missing state-actions")
 
 
 def analyze_fb_checkpoint(run_dir: str | Path | RunDirectory) -> FBCheckpointReport:
@@ -65,15 +45,11 @@ def analyze_fb_checkpoint(run_dir: str | Path | RunDirectory) -> FBCheckpointRep
     if settings.get("origin") != "oracle":
         raise ValueError("occupancy comparison requires the saved uniform-coverage oracle dataset")
     env = FourRooms()
-    _require_full_coverage(
-        TransitionFile(run.store.dataset_path, expected_sha256=settings.get("sha256")), env
-    )
+    # Verify uniform state-action coverage instead of trusting the dataset label.
+    dataset = TransitionFile(run.store.dataset_path, expected_sha256=settings.get("sha256"))
+    env.require_full_coverage(dataset.iter_transitions())
     agent = load_agent(run.store.checkpoint_path)
-    if (
-        agent.config.observation_dim != env.observation_dim
-        or agent.config.num_actions != env.num_actions
-    ):
-        raise ValueError("checkpoint is incompatible with Four Rooms")
+    agent.config.spec.require_compatible(env.spec, consumer="FB checkpoint")
     oracle = build_four_rooms_oracle(env, run.goal, gamma=agent.config.gamma)
     n = len(oracle.positions)
     obs = np.stack([env.observation_for(pos) for pos in oracle.positions])
@@ -89,12 +65,12 @@ def analyze_fb_checkpoint(run_dir: str | Path | RunDirectory) -> FBCheckpointRep
         raise ValueError("nonfinite network predictions")
     # Oracle dataset is uniform over (state, action), hence rho(state)=1/S.
     expected_occupancy_density = n * exact_discounted_occupancy(
-        oracle.next_state_indices, policy, gamma=agent.config.gamma
+        oracle.dynamics, policy, gamma=agent.config.gamma
     )
     non_goal = np.arange(n) != oracle.goal_index
     snapshot = run.store.read_policy_snapshot("final")
     if snapshot is not None:
-        snapshot.require_action_space(DiscreteActionSpec(env.num_actions))
+        snapshot.require_action_space(env.spec.action)
         snapshot_actions = np.asarray(snapshot.actions_for(oracle.positions))
         if not np.array_equal(snapshot_actions, np.argmax(learned_q, axis=1)):
             raise ValueError("saved final policy snapshot disagrees with the checkpoint")

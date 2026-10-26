@@ -47,7 +47,7 @@ src/aeris/
   domain/          Framework-independent records: experiments, transitions, results, validation
   contracts/       Protocols at component boundaries: Agent, Environment, BatchProvider, RunRecorder
   agents/fb/       Discrete-action Forward-Backward agent, networks and batch sampler
-  environments/    Four Rooms grid world
+  environments/    Four Rooms grid world and exact tabular models (TabularDynamics, TabularMDP)
   experiments/     Generic collection, training and goal-evaluation loops
   data/            Run directories (typed read/write of every artifact), file formats, run catalog
   analysis/        Exact tabular baselines and run/checkpoint diagnostics (no file I/O, no plotting)

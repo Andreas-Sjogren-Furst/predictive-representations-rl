@@ -20,8 +20,8 @@ from aeris.analysis.tabular import (
 from aeris.data.run_directory import RunDirectory
 from aeris.domain.reports import SnapshotReport, TabularPolicyReport
 from aeris.domain.results import RunManifest
-from aeris.domain.spaces import DiscreteActionSpec
-from aeris.environments.gridworld import FourRooms
+from aeris.environments.four_rooms import FourRooms
+from aeris.environments.tabular import TabularDynamics, TabularMDP
 
 Position = tuple[int, int]
 SNAPSHOT_PHASES = ("initial", "final")
@@ -53,24 +53,37 @@ def load_four_rooms_run(run_dir: str | Path | RunDirectory) -> FourRoomsRun:
         store=store,
         manifest=manifest,
         task_id=task.task_id,
-        goal=(int(task.settings["goal_row"]), int(task.settings["goal_col"])),
+        goal=FourRooms().goal_from_task(task),
         max_steps=int(experiment.evaluation.protocol.settings["max_steps"]),
     )
 
 
 @dataclass(frozen=True, slots=True)
 class FourRoomsOracle:
-    positions: tuple[Position, ...]
+    """Exact goal-reaching model of Four Rooms and its optimal values."""
+
+    mdp: TabularMDP
     goal: Position
     goal_index: int
-    next_state_indices: np.ndarray
     shortest_distances: np.ndarray
     optimal: OptimalValues
+
+    @property
+    def dynamics(self) -> TabularDynamics:
+        return self.mdp.dynamics
+
+    @property
+    def positions(self) -> tuple[Position, ...]:
+        return self.mdp.dynamics.states
+
+    @property
+    def next_state_indices(self) -> np.ndarray:
+        return self.mdp.dynamics.next_states
 
     def compare(self, actions: np.ndarray, *, max_steps: int) -> PolicyDiagnostics:
         return compare_deterministic_policy(
             actions,
-            self.next_state_indices,
+            self.dynamics,
             self.optimal,
             goal_index=self.goal_index,
             max_steps=max_steps,
@@ -81,32 +94,17 @@ class FourRoomsOracle:
 def build_four_rooms_oracle(
     env: FourRooms, goal: Position, *, gamma: float = 0.99
 ) -> FourRoomsOracle:
-    """Goal reward = 1 on ENTERING the goal; the goal then becomes terminal.
-
-    This diagnostic reward is deliberately separate from the reward-free FB
-    pretraining transitions. A reward is NOT repeatedly earned by waiting at
-    the goal, nor assumed to have been present during training.
-    """
-    if goal not in env.positions:
-        raise ValueError(f"invalid Four Rooms goal: {goal!r}")
-    index = {pos: i for i, pos in enumerate(env.positions)}
-    goal_index = index[goal]
-    next_states = np.asarray(
-        [
-            [index[env.next_position(pos, a)] for a in range(env.num_actions)]
-            for pos in env.positions
-        ],
-        dtype=np.int64,
+    """Solve the goal-reaching task exactly (see ``TabularMDP.goal_reaching``)."""
+    dynamics = env.tabular_dynamics()
+    goal_index = dynamics.index_of(goal)
+    mdp = TabularMDP.goal_reaching(dynamics, goal_index, gamma=gamma)
+    return FourRoomsOracle(
+        mdp=mdp,
+        goal=goal,
+        goal_index=goal_index,
+        shortest_distances=dynamics.shortest_path_lengths(goal_index),
+        optimal=value_iteration(mdp),
     )
-    rewards = (next_states == goal_index).astype(np.float64)
-    rewards[goal_index] = 0.0
-    done = np.zeros(len(env.positions), dtype=bool)
-    done[goal_index] = True
-    distances = np.asarray(
-        [env.shortest_distance(pos, goal) for pos in env.positions], dtype=np.int64
-    )
-    optimal = value_iteration(next_states, rewards, done, gamma=gamma)
-    return FourRoomsOracle(env.positions, goal, goal_index, next_states, distances, optimal)
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +142,7 @@ def analyze_saved_four_rooms_run(
         snapshot = run.store.read_policy_snapshot(phase)
         if snapshot is None:
             continue
-        snapshot.require_action_space(DiscreteActionSpec(env.num_actions))
+        snapshot.require_action_space(env.spec.action)
         actions = np.asarray(snapshot.actions_for(oracle.positions), dtype=np.int64)
         diagnostics = oracle.compare(actions, max_steps=run.max_steps)
         snapshots[phase] = SnapshotDiagnostics(actions, diagnostics)

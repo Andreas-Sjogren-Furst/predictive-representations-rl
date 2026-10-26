@@ -1,8 +1,9 @@
 """Exact deterministic tabular MDP diagnostics, independent of the agent.
 
-This solver assumes discrete states/actions, known deterministic transitions,
-rewards received on transition, absorbing terminal states, and 0 <= gamma < 1.
-It does not claim to evaluate partially observed or stochastic environments.
+Inputs are validated ``TabularMDP`` / ``TabularDynamics`` models: discrete
+states and actions, known deterministic transitions, rewards on transition,
+absorbing terminals and 0 <= gamma < 1. Partially observed or stochastic
+environments are out of scope.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from aeris.domain.reports import PolicySummary
-from aeris.domain.validation import require_int
+from aeris.environments.tabular import TabularDynamics, TabularMDP
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,38 +25,16 @@ class OptimalValues:
 
 
 def value_iteration(
-    next_states: np.ndarray,
-    rewards: np.ndarray,
-    terminals: np.ndarray,
+    mdp: TabularMDP,
     *,
-    gamma: float = 0.99,
     tolerance: float = 1e-11,
     max_iterations: int = 10_000,
     tie_tolerance: float = 1e-8,
 ) -> OptimalValues:
     """Solve V*(s)=max_a [r(s,a)+gamma V*(next(s,a))] in a deterministic MDP."""
-    states = np.asarray(next_states)
-    r = np.asarray(rewards)
-    done = np.asarray(terminals)
-    if states.ndim != 2 or not states.size or states.shape[1] < 1 or states.dtype.kind not in "iu":
-        raise ValueError("next_states must have shape [states, actions] with integer indices")
-    num_states = states.shape[0]
-    if np.any((states < 0) | (states >= num_states)):
-        raise ValueError("next_states contains an out-of-range index")
-    if r.shape != states.shape or r.dtype.kind not in "iuf" or not np.all(np.isfinite(r)):
-        raise ValueError("rewards must be finite and match next_states shape")
-    if done.shape != (num_states,) or done.dtype.kind != "b":
-        raise ValueError("terminals must be a boolean vector of length num_states")
-    if not np.isfinite(gamma) or not 0 <= gamma < 1:
-        raise ValueError("gamma must lie in [0, 1)")
-    if not np.isfinite(tolerance) or tolerance <= 0:
-        raise ValueError("tolerance must be positive and finite")
-    if not np.isfinite(tie_tolerance) or tie_tolerance < 0:
-        raise ValueError("tie_tolerance must be nonnegative and finite")
-    require_int("max_iterations", max_iterations, minimum=1)
-
-    r = r.astype(np.float64)
-    values = np.zeros(num_states, dtype=np.float64)
+    states = mdp.dynamics.next_states
+    r, done, gamma = mdp.rewards, mdp.terminals, mdp.gamma
+    values = np.zeros(mdp.dynamics.num_states, dtype=np.float64)
     for iteration in range(1, max_iterations + 1):  # noqa: B007 (reported after the loop)
         q = r + gamma * values[states]
         q[done] = 0.0
@@ -98,7 +77,7 @@ class PolicyDiagnostics:
 
 def compare_deterministic_policy(
     actions: np.ndarray,
-    next_states: np.ndarray,
+    dynamics: TabularDynamics,
     optimal: OptimalValues,
     *,
     goal_index: int,
@@ -109,26 +88,10 @@ def compare_deterministic_policy(
 
     Fractions weight all non-goal states uniformly, not by the evaluation reset
     distribution. This is an exact, model-based diagnostic, not sampled return.
+    ``actions`` holds one valid action index per state of ``dynamics``.
     """
-    nxt = np.asarray(next_states)
-    act = np.asarray(actions)
-    distances = np.asarray(shortest_distances)
-    num_states, num_actions = nxt.shape
-    if (
-        act.shape != (num_states,)
-        or act.dtype.kind not in "iu"
-        or np.any((act < 0) | (act >= num_actions))
-    ):
-        raise ValueError("actions must be valid integer choices for every state")
-    if distances.shape != (num_states,) or np.any(distances < 0):
-        raise ValueError("shortest_distances must be finite nonnegative lengths")
-    require_int("goal_index", goal_index)
-    if goal_index >= num_states:
-        raise ValueError("goal_index is invalid")
-    require_int("max_steps", max_steps, minimum=1)
-    if optimal.action_values.shape != (num_states, num_actions):
-        raise ValueError("optimal values are incompatible with environment")
-
+    nxt, act, distances = dynamics.next_states, np.asarray(actions), shortest_distances
+    num_states = dynamics.num_states
     states = np.arange(num_states)
     non_goal = states != goal_index
     choice_q = optimal.action_values[states, act]

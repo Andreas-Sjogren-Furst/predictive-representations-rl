@@ -5,7 +5,10 @@ possible; dimensions and action count come from the selected environment.
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
+
+from aeris.domain.spaces import DiscreteActionSpec, ObservationSpec, SpaceSpec
+from aeris.domain.validation import require_int
 
 TaskSampling = Literal["cauchy_ball", "uniform_ball", "goal_oriented"]
 
@@ -27,14 +30,9 @@ class DiscreteFBConfig:
     device: str = "cpu"
 
     def __post_init__(self) -> None:
-        for key in ("observation_dim", "num_actions", "representation_dim", "hidden_dim"):
-            val = getattr(self, key)
-            if (
-                isinstance(val, bool)
-                or not isinstance(val, int)
-                or val < (2 if key == "num_actions" else 1)
-            ):
-                raise ValueError(f"{key} must be a positive integer (num_actions >= 2)")
+        for key in ("observation_dim", "representation_dim", "hidden_dim"):
+            require_int(key, getattr(self, key), minimum=1)
+        require_int("num_actions", self.num_actions, minimum=2)
         if not (0 <= self.gamma < 1):
             raise ValueError("gamma must be in [0, 1)")
         if not (0 <= self.polyak < 1):
@@ -45,5 +43,12 @@ class DiscreteFBConfig:
             raise ValueError("exploration_epsilon must be in [0, 1]")
         if self.regularization_coefficient < 0:
             raise ValueError("regularization_coefficient must be nonnegative")
-        if self.task_sampling not in ("cauchy_ball", "uniform_ball", "goal_oriented"):
+        if self.task_sampling not in get_args(TaskSampling):
             raise ValueError(f"unsupported task sampling: {self.task_sampling}")
+
+    @property
+    def spec(self) -> SpaceSpec:
+        """Observations and actions this agent was built for."""
+        return SpaceSpec(
+            ObservationSpec(self.observation_dim), DiscreteActionSpec(self.num_actions)
+        )

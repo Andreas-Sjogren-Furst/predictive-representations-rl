@@ -4,14 +4,16 @@ import pytest
 from aeris.analysis.four_rooms import build_four_rooms_oracle
 from aeris.analysis.tabular import compare_deterministic_policy, value_iteration
 from aeris.domain import PolicySnapshot
-from aeris.environments import FourRooms
+from aeris.environments import FourRooms, TabularDynamics, TabularMDP
 
 
 def test_value_iteration_simple_goal_ties():
     # 0 --(a0,a1)--> 1(goal); actions tie at state 0.
-    nxt = np.array([[1, 1], [1, 1]])
-    rewards = np.array([[1.0, 1.0], [0.0, 0.0]])
-    optimal = value_iteration(nxt, rewards, np.array([False, True]), gamma=0.9)
+    dynamics = TabularDynamics(((0,), (1,)), np.array([[1, 1], [1, 1]]))
+    mdp = TabularMDP(
+        dynamics, np.array([[1.0, 1.0], [0.0, 0.0]]), np.array([False, True]), gamma=0.9
+    )
+    optimal = value_iteration(mdp)
     assert optimal.values.tolist() == pytest.approx([1, 0])
     assert optimal.optimal_actions.tolist() == [[True, True], [False, False]]
 
@@ -37,7 +39,7 @@ def test_optimal_policy_has_full_success_from_all_starts():
     policy = np.argmax(model.optimal.optimal_actions, axis=1).astype(np.int64)
     diag = compare_deterministic_policy(
         policy,
-        model.next_state_indices,
+        model.dynamics,
         model.optimal,
         goal_index=model.goal_index,
         shortest_distances=model.shortest_distances,
@@ -55,7 +57,7 @@ def test_policy_loop_does_not_accidentally_count_as_success():
     policy = np.zeros(len(model.positions), dtype=np.int64)  # always up
     diag = compare_deterministic_policy(
         policy,
-        model.next_state_indices,
+        model.dynamics,
         model.optimal,
         goal_index=model.goal_index,
         shortest_distances=model.shortest_distances,
@@ -86,10 +88,3 @@ def test_snapshot_missing_state_rejected():
     snapshot = PolicySnapshot(states=positions, actions=[0] * len(positions))
     with pytest.raises(ValueError, match="don't match"):
         snapshot.actions_for(model.positions)
-
-
-def test_bad_mdp_input_and_discount_rejected():
-    with pytest.raises(ValueError, match="gamma"):
-        value_iteration(np.array([[0]]), np.array([[0.0]]), np.array([False]), gamma=1.0)
-    with pytest.raises(ValueError, match="out-of-range"):
-        value_iteration(np.array([[1]]), np.array([[0.0]]), np.array([False]))

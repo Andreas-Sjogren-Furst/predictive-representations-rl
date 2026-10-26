@@ -25,6 +25,8 @@ The contracts use `typing.Protocol` for structural compatibility. The runtime `i
 | | `Checkpointable` | Supply/restore opaque learning state | Picking checkpoint paths or writing files |
 | | `TaskConditioner[EvidenceT]` | Infer a policy condition from authorized evidence | Obtaining hidden evaluation rewards; updating weights |
 | `contracts/environment.py` | `Environment` | `reset`, `step`, `close` | Choosing agent actions or computing analysis metrics |
+| | `TabularModel` | Expose `spec`, exact `tabular_dynamics()`, `observation_for(state)` and the environment's goal-task format, for oracle analyses only | Being used by learning code |
+| | `TransitionTable` | Enumerated states and an integer successor table (implemented by `environments.tabular.TabularDynamics`) | Rewards or task definitions (see `TabularMDP`) |
 | `contracts/dataset.py` | `TransitionSource` | Read one-step recorded experience lazily | Choosing training batches or neural-network encodings |
 | | `BatchProvider[BatchT]` | Construct next strategy-specific batch | Changing the learner or the raw dataset |
 | `contracts/recorder.py` | `RunRecorder` | Record manifest, training metrics, evaluation | Deciding experiment configuration or scientific comparability |
@@ -78,7 +80,7 @@ Tests verify discrete/simple vector observations, toy reward-free environment st
 
 ## Deferred design choices (intentionally unresolved)
 
-1. **Compatibility/SpaceSpec:** *First pass added in `domain/spaces.py` (flat observations, discrete actions); not yet wired into environments and agents.* Determine a backend-independent way to describe observation/action modalities, shapes, and bounds, then check them at resolution time, before costly training. First mock runner should exercise one compatible and one incompatible combination.
+1. **Compatibility/SpaceSpec:** *First pass in `domain/spaces.py` (flat observations, discrete actions): `FourRooms.spec` and `DiscreteFBConfig.spec`, checked with `SpaceSpec.require_compatible` when a checkpoint is analyzed.* Determine a backend-independent way to describe observation/action modalities, shapes, and bounds, then check them at resolution time, before costly training. First mock runner should exercise one compatible and one incompatible combination.
 2. **Task inference evidence:** A resolved evidence view (reward-labeled samples, demonstrations, or something else) must be permission-scoped, with explicit provenance; `TaskConditioner` alone cannot prevent evaluation leakage.
 3. **Recorder artifacts:** Add indexed trajectories/representations/videos and full error and checkpoint metadata only with a real storage implementation.
 4. **Training workflow:** How to select and instantiate `BatchProvider` and update cadence lives in a training strategy, not `Agent` or `Environment`.

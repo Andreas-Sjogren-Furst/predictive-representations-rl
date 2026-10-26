@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aeris.environments.gridworld import FourRooms
+from aeris.environments.four_rooms import FourRooms
 
 ACTION_ARROWS = {0: "↑", 1: "↓", 2: "←", 3: "→"}
 WALL_COLOR = "0.35"

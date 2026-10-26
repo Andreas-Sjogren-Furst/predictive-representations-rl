@@ -11,7 +11,7 @@ from aeris.analysis.four_rooms import SNAPSHOT_PHASES, load_four_rooms_run
 from aeris.domain.artifacts import PolicySnapshot
 from aeris.domain.results import EvaluationRecord, TrainingMetricRecord
 from aeris.domain.trajectory import EvaluationTrajectory
-from aeris.environments.gridworld import FourRooms
+from aeris.environments.four_rooms import FourRooms
 from aeris.visualization._plotting import ACTION_ARROWS, draw_grid, pyplot, save_figure
 
 # Evaluation checkpoint labels written by examples/fb_four_rooms.py.

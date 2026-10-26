@@ -44,7 +44,7 @@ maze scores, nor proof of zero-shot generalization beyond this test case.
 
 ## Deliberate separation
 
-- `environments/gridworld.py`: environment dynamics + optional oracle methods.
+- `environments/four_rooms.py`: Four Rooms dynamics, space spec, goal tasks and exact tabular model; `environments/tabular.py`: `TabularDynamics` and `TabularMDP`.
 - `experiments/collection.py`: generic environment → transitions.
 - `agents/fb/batch.py`: FB-specific training batch sampling (already exists).
 - `experiments/training.py`: generic BatchProvider → TrainableAgent updates.

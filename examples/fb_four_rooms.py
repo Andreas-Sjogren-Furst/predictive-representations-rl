@@ -27,7 +27,6 @@ from aeris.domain import (
     TrainingPlan,
     Transition,
 )
-from aeris.domain.spaces import DiscreteActionSpec
 from aeris.environments import FourRooms
 from aeris.experiments import (
     collect_transitions,
@@ -137,9 +136,7 @@ def main() -> None:
     run = RunDirectory(args.output)
     fingerprint = write_transitions_npz(run.dataset_path, transitions)
 
-    task = TaskSpec(
-        task_id=f"reach_{goal[0]}_{goal[1]}", settings={"goal_row": goal[0], "goal_col": goal[1]}
-    )
+    task = env.goal_task(goal)
     spec = build_spec(args, task, count=len(transitions), fingerprint=fingerprint)
     run_id = f"fb_four_rooms_seed_{args.seed}"
     provenance = {
@@ -159,7 +156,7 @@ def main() -> None:
         snapshot = record_policy_snapshot(
             agent, eval_env.positions, eval_env.observation_for, condition=condition
         )
-        snapshot.require_action_space(DiscreteActionSpec(eval_env.num_actions))
+        snapshot.require_action_space(eval_env.spec.action)
         run.write_policy_snapshot(phase, snapshot)
         record = evaluate_goal_policy(
             agent,
