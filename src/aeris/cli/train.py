@@ -38,8 +38,8 @@ def four_rooms(
     ] = 3,
     goal_row: Annotated[int, typer.Option(help="Evaluation goal row.")] = 9,
     goal_col: Annotated[int, typer.Option(help="Evaluation goal column.")] = 9,
-    representation_dim: Annotated[int, typer.Option(help="FB representation size d.")] = 32,
-    hidden_dim: Annotated[int, typer.Option(help="Hidden units per FB network layer.")] = 128,
+    representation_dim: Annotated[int, typer.Option(help="FB representation size d.")] = 100,
+    hidden_dim: Annotated[int, typer.Option(help="Hidden units per FB network layer.")] = 256,
     log_every: Annotated[
         int | None,
         typer.Option(help="Updates between logged losses (default: 100 points per run)."),

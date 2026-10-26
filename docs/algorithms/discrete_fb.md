@@ -8,7 +8,7 @@ Adapted implementation of Ahmed Touati and Yann Ollivier, *Learning One Represen
 - https://github.com/ahmed-touati/controllable_agent/blob/main/grid_modules/mdp_utils.py
 - https://github.com/ahmed-touati/controllable_agent
 
-Implementation is **not yet a validated reproduction of paper scores**. Upstream's grid-world environment, online sampling schedules and evaluation protocols have **not** been ported. This module implements its discrete FB network architecture, objective and agent-facing operations so we can test the algorithm through AERIS.
+Implementation is **not yet a validated reproduction of paper scores**. Training defaults use upstream's discrete-maze sizes (`representation_dim = 100`, `hidden_dim = 256`, learning rate 5e-4, temperature 200, polyak 0.95 every 40 updates, Cauchy task sampling). Upstream's grid-world environment, online sampling schedules and evaluation protocols have **not** been ported. This module implements its discrete FB network architecture, objective and agent-facing operations so we can test the algorithm through AERIS.
 
 No upstream source file is copied verbatim. Verify upstream licensing and attribution before redistribution.
 
@@ -26,7 +26,13 @@ the implementation minimizes
 
 `L_FB = 0.5 mean_ij ( F(s_i,a_i,z_i) · B(s_other_j) - gamma M_target[i,j] )^2 - mean_i F(s_i,a_i,z_i) · B(s_i)`
 
-plus the exact *stop-gradient placement* in the reference backward-feature regularizer, weighted by `regularization_coefficient`. Targets are updated after the optimizer step using `target = polyak * target + (1 - polyak) * source`, **once every `target_update_period` gradient updates** (default 40). Upstream's `learn()` soft-updates the targets once per cycle, after `n_batches = 40` gradient steps, not after every step. An earlier AERIS version updated after every step; with `polyak = 0.95` its target then tracked the online network within about 20 updates, and on Four Rooms F·B learned only the constant part of the occupancy (correlation with the exact occupancy stayed at 0.000 over 8000 updates) while B collapsed to nearly one vector. With the upstream cadence the correlation rose steadily, to 0.50 after 8000 updates.
+plus an orthonormality regularizer on `B`, weighted by `regularization_coefficient`:
+
+`L_reg = mean_{i != j} ( B(s_i) · B(s_j) )^2 - 2 mean_i |B(s_i)|^2`
+
+which equals `2 * (0.5 * ||E_rho[B B^T] - I||^2 - d/2)`, so its gradient is proportional to `(E[B B^T] - I) B(s)`. This is the covariance form used by the later FB reference implementation (`url_benchmark`, `fb_ddpg`).
+
+**Deliberate deviation from the grid reference.** The grid reference computes `mean_ij |B(s_j)|^2 sg(B(s_i) · B(s'_j)) - mean_ij B(s_i) · sg(B(s'_j))` with independent states `s'` (`sg` = stop-gradient). Its expected gradient with respect to `B(s)` is `B(s) |mu|^2 - mu` with `mu = E[B]`: it depends only on the mean of `B`, and "every state has the same unit-norm `B`" is a fixed point, which is not orthonormality. On Four Rooms with the upstream target cadence, the covariance form reached a correlation of 0.57 with the exact occupancy after 8000 updates versus 0.50 for the grid form (32-d representation, 128 hidden units). Targets are updated after the optimizer step using `target = polyak * target + (1 - polyak) * source`, **once every `target_update_period` gradient updates** (default 40). Upstream's `learn()` soft-updates the targets once per cycle, after `n_batches = 40` gradient steps, not after every step. An earlier AERIS version updated after every step; with `polyak = 0.95` its target then tracked the online network within about 20 updates, and on Four Rooms F·B learned only the constant part of the occupancy (correlation with the exact occupancy stayed at 0.000 over 8000 updates) while B collapsed to nearly one vector. With the upstream cadence the correlation rose steadily, to 0.50 after 8000 updates.
 
 The objective intentionally does **not** use transition rewards or dones, consistent with the inspected reference implementation. That choice must be reconsidered for absorbing terminals in future environments, rather than silently changing the baseline.
 

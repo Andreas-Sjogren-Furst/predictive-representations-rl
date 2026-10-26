@@ -88,10 +88,10 @@ def test_diagnostic_refuses_a_checkpoint_from_another_configuration(tmp_path):
 
     outcome = train_four_rooms_fb(FourRoomsFBTraining(output=tmp_path / "run", **TINY))
     other = DiscreteFBConfig(
-        observation_dim=121, num_actions=4, representation_dim=32, hidden_dim=64, seed=7
+        observation_dim=121, num_actions=4, representation_dim=100, hidden_dim=64, seed=7
     )
     save_checkpoint(outcome.run.checkpoint_path, DiscreteFBAgent(other))
-    with pytest.raises(ValueError, match="hidden_dim .manifest 128, checkpoint 64."):
+    with pytest.raises(ValueError, match="hidden_dim .manifest 256, checkpoint 64."):
         diagnose_fb_checkpoint(outcome.run)
 
 

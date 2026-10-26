@@ -1,9 +1,11 @@
 """AERIS adaptation of Touati & Ollivier (2021) discrete-action FB.
 
 Reference: github.com/ahmed-touati/controllable_agent/grid_modules/fb_agent.py
-Preserves the all-action forward map, Boltzmann target expectation, FB loss,
-partially detached orthonormality regularizer, and Polyak target updates.
-Unlike the reference, this object does not own an environment or replay buffer.
+Preserves the all-action forward map, Boltzmann target expectation, FB loss
+and Polyak target updates every 40 gradient steps. Deliberately differs in the
+orthonormality regularizer, which uses the covariance form of url_benchmark's
+FB (see docs/algorithms/discrete_fb.md). Unlike the reference, this object
+does not own an environment or replay buffer.
 """
 
 from __future__ import annotations
@@ -255,13 +257,14 @@ class DiscreteFBAgent:
         td_error = successor - self.config.gamma * target_successor
         fb_loss = 0.5 * td_error.square().mean() - diagonal.mean()
 
-        # Intentionally asymmetric detach placement from original FB grid loss.
-        b_b_other = b @ b_other.T
-        b_b_other_detach = b @ b_other.detach().T
-        b_b_detach = (b * b.detach()).sum(dim=-1)
-        # Upstream multiplies a [B] vector by a [B,B] matrix: broadcasting
-        # aligns the vector to the *columns* (not the rows).
-        reg_loss = (b_b_detach[None, :] * b_b_other.detach()).mean() - b_b_other_detach.mean()
+        # Orthonormality of B under the data distribution: E_{s!=s'}[(B(s)·B(s'))^2]
+        # - 2 E[|B(s)|^2] = 2 * (0.5 * ||E[B B^T] - I||^2 - d/2), as in url_benchmark's FB.
+        # Its gradient is proportional to (E[B B^T] - I) B(s). The grid reference's
+        # regularizer has expected gradient B(s)|E B|^2 - E B instead, which makes
+        # "every state has the same B" a fixed point (see docs/algorithms/discrete_fb.md).
+        cov = b @ b.T
+        off_diagonal = ~torch.eye(len(b), dtype=torch.bool, device=self.device)
+        reg_loss = cov[off_diagonal].square().mean() - 2 * cov.diagonal().mean()
         total_loss = fb_loss + self.config.regularization_coefficient * reg_loss
         if not bool(torch.isfinite(total_loss)):
             raise FloatingPointError("FB loss became nonfinite")

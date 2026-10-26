@@ -98,8 +98,9 @@ def test_loss_matches_direct_reference_for_fixed_samples():
             0.5 * (f @ comparison.T - a.config.gamma * target).square().mean()
             - (f * backwards).sum(-1).mean()
         )
-        coupling = backwards @ comparison.T
-        reg = ((backwards * backwards).sum(-1)[None, :] * coupling).mean() - coupling.mean()
+        cov = backwards @ backwards.T
+        off_diagonal = ~torch.eye(len(backwards), dtype=torch.bool)
+        reg = cov[off_diagonal].square().mean() - 2 * cov.diagonal().mean()
         expected = fb + a.config.regularization_coefficient * reg
     output = a.update(b)
     measured = {m.name: m.value for m in output}

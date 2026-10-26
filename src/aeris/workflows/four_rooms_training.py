@@ -54,8 +54,8 @@ class FourRoomsFBTraining:
     seed: int = 7
     trajectories: int = 3  # evaluation episodes saved per checkpoint (0 disables)
     goal: Position = (9, 9)
-    representation_dim: int = 32
-    hidden_dim: int = 128
+    representation_dim: int = 100  # upstream discrete-maze settings
+    hidden_dim: int = 256
     log_every: int | None = None  # updates between logged metrics; default: 100 points per run
 
     def __post_init__(self) -> None:
