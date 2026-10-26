@@ -79,8 +79,12 @@ BUILT_IN = (
     Layout(
         name="Compare runs",
         panels=(
+            PanelSpec(panel="group_summary", width=2),
             PanelSpec(panel="run_comparison", width=2),
-            PanelSpec(panel="loss_curves", options={"metrics": ["fb_loss"], "smoothing": 5}),
+            PanelSpec(
+                panel="loss_curves",
+                options={"metrics": ["fb_loss"], "smoothing": 5, "group_by": "name"},
+            ),
             PanelSpec(panel="evaluation"),
             PanelSpec(panel="suite_scores", width=2),
         ),

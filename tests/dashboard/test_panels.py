@@ -111,7 +111,10 @@ def test_map_panels_check_optimality_and_animate(four_rooms_run):
 
 def test_multi_run_panels_overlay_runs(four_rooms_run):
     runs = [populate(four_rooms_run("a")), populate(four_rooms_run("b"))]
-    curves = PANELS["loss_curves"].render(runs, {"metrics": ("fb_loss",), "smoothing": 1})
+    panel = PANELS["loss_curves"]
+    curves = panel.render(
+        runs, panel.resolve_options(runs, {"metrics": ("fb_loss",), "smoothing": 1})
+    )
     assert [trace.name for trace in curves.data] == ["a · fb_loss", "b · fb_loss"]
     table = PANELS["run_comparison"].render(runs, {})
     assert [row["run"] for row in table.rows] == ["a", "b"]
@@ -212,3 +215,25 @@ def test_task_policy_marks_invisible_tasks(four_rooms_run):
     first = report.tasks[0].task.task_id  # synthetic: no rewarded dataset evidence
     figure = PANELS["task_policy"].render([data], {"task": first, "protocol": "dataset_rewards"})
     assert "no rewarded evidence" in figure.layout.title.text
+
+
+def test_grouped_panels_aggregate_seeds(four_rooms_run):
+    from aeris.dashboard.panels.grouping import group_choice
+
+    runs = []
+    for index in range(3):
+        run = four_rooms_run(f"seed{index}")
+        run.write_report(synthetic_suite_report(seed=index))
+        runs.append(populate(run))
+    assert group_choice(runs).choices == ("run", "name")  # nothing else differs between them
+    curves = PANELS["loss_curves"].render(
+        runs, {"metrics": ("fb_loss",), "smoothing": 1, "group_by": "name"}
+    )
+    assert [t.name for t in curves.data] == [
+        "name=fb_demo (n=3) · fb_loss",
+        "name=fb_demo (n=3) · fb_loss ± std",
+    ]
+    bars = PANELS["suite_scores"].render(runs, {"protocol": "dataset_rewards", "group_by": "name"})
+    assert len(bars.data) == 1 and bars.data[0].error_y.visible
+    table = PANELS["group_summary"].render(runs, {"group_by": "name"})
+    assert "(n=3)" in table.rows[0]["name=fb_demo (n=3)"]

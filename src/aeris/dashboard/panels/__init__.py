@@ -10,7 +10,7 @@ from aeris.dashboard.panels.representations import (
     RepresentationSimilarity,
     ValueMap,
 )
-from aeris.dashboard.panels.tables import ReportView, RunComparison, RunOverview
+from aeris.dashboard.panels.tables import GroupSummaryTable, ReportView, RunComparison, RunOverview
 from aeris.dashboard.panels.tasks import (
     GoalScoresMap,
     SuiteDistribution,
@@ -24,6 +24,7 @@ PANELS: dict[str, Panel] = {
     panel.name: panel
     for panel in (
         RunComparison(),
+        GroupSummaryTable(),
         LossCurves(),
         EvaluationResults(),
         PolicyMap(),

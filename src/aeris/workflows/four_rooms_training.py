@@ -6,6 +6,7 @@ Needs the ``fb-torch`` extra.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -41,11 +42,17 @@ from aeris.workflows.provenance import code_revision
 DatasetOrigin = Literal["oracle", "random"]
 
 
+def run_name(name: str, seed: int) -> str:
+    """Run id and default directory name of one seed of an experiment."""
+    return f"{name}_seed{seed}"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FourRoomsFBTraining:
     """Everything that defines one training run; recorded in its manifest."""
 
     output: Path
+    name: str = "fb_four_rooms"  # experiment (group) name shared by a configuration's seeds
     dataset: DatasetOrigin = "oracle"  # full state-action coverage, or random collection
     transitions: int = 5000  # collection size for the random dataset
     updates: int = 250
@@ -60,6 +67,8 @@ class FourRoomsFBTraining:
     log_every: int | None = None  # updates between logged metrics; default: 100 points per run
 
     def __post_init__(self) -> None:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", self.name):
+            raise ValueError("name must be letters, digits, '_', '.' or '-' (it names directories)")
         if self.dataset not in get_args(DatasetOrigin):
             raise ValueError(f"dataset must be one of {get_args(DatasetOrigin)}")
         for name in ("transitions", "updates", "batch_size", "episodes", "max_steps"):
@@ -72,7 +81,7 @@ class FourRoomsFBTraining:
 
     @property
     def run_id(self) -> str:
-        return f"fb_four_rooms_seed_{self.seed}"
+        return run_name(self.name, self.seed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,7 +234,7 @@ def _experiment_spec(
     fingerprint: str,
 ) -> ExperimentSpec:
     return ExperimentSpec(
-        name="fb_four_rooms_diagnostic",
+        name=settings.name,
         # The full configuration, so the manifest alone says how the agent was built.
         agent=ComponentSpec(name="discrete_fb", settings=asdict(config)),
         environment=ComponentSpec(

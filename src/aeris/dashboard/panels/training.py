@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 
 from aeris.dashboard.data import RunData
 from aeris.dashboard.panels.base import STYLE, Message, MultiChoice, Number, Option, Output, Panel
+from aeris.dashboard.panels.grouping import group_choice, group_runs, label, mean_and_std
 
 
 def _metric_names(runs: Sequence[RunData]) -> tuple[str, ...]:
@@ -20,6 +21,14 @@ def _metric_names(runs: Sequence[RunData]) -> tuple[str, ...]:
             for metric in record.metrics:
                 names.setdefault(metric.name)
     return tuple(names)
+
+
+def _series(run: RunData, metric: str, window: int) -> tuple[np.ndarray, np.ndarray] | None:
+    points = [(r.step, m.value) for r in run.training for m in r.metrics if m.name == metric]
+    if not points:
+        return None
+    steps, values = (np.asarray(v, dtype=float) for v in zip(*points, strict=True))
+    return steps, smooth(values, int(window))
 
 
 def smooth(values: np.ndarray, window: int) -> np.ndarray:
@@ -39,7 +48,7 @@ class LossCurves(Panel):
     name = "loss_curves"
     title = "Training curves"
     scope = "runs"
-    description = "Any logged training metric over gradient updates; overlays every selected run."
+    description = "Any logged metric over updates; overlays runs or groups (mean ± std band)."
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
         names = _metric_names(runs)
@@ -47,6 +56,7 @@ class LossCurves(Panel):
         return (
             MultiChoice("metrics", "Metrics", names, default),
             Number("smoothing", "Smoothing (logged points)", 1, minimum=1, maximum=200),
+            group_choice(runs),
         )
 
     def missing(self, runs: Sequence[RunData]) -> str | None:
@@ -57,25 +67,32 @@ class LossCurves(Panel):
         if not metrics:
             return Message("Choose at least one metric.")
         fig = go.Figure()
-        for run in runs:
+        groups = group_runs(runs, options["group_by"])
+        for group, members in groups.items():
             for metric in metrics:
-                points = [
-                    (record.step, m.value)
-                    for record in run.training
-                    for m in record.metrics
-                    if m.name == metric
-                ]
-                if not points:
+                series = [s for run in members if (s := _series(run, metric, options["smoothing"]))]
+                if not series:
                     continue
-                steps, values = (np.asarray(v, dtype=float) for v in zip(*points, strict=True))
-                label = metric if len(runs) == 1 else f"{run.label} · {metric}"
-                fig.add_trace(
-                    go.Scatter(
-                        x=steps,
-                        y=smooth(values, int(options["smoothing"])),
-                        mode="lines",
-                        name=label,
-                    )
+                name = (
+                    metric
+                    if len(groups) == 1 and len(members) == 1
+                    else f"{label(group, members)} · {metric}"
                 )
+                steps, mean, std = mean_and_std(series)
+                line = go.Scatter(x=steps, y=mean, mode="lines", name=name)
+                fig.add_trace(line)
+                if len(series) > 1:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=np.concatenate([steps, steps[::-1]]),
+                            y=np.concatenate([mean + std, (mean - std)[::-1]]),
+                            fill="toself",
+                            opacity=0.2,
+                            line={"width": 0},
+                            hoverinfo="skip",
+                            name=f"{name} ± std",
+                            showlegend=False,
+                        )
+                    )
         fig.update_xaxes(title="gradient updates")
         return STYLE.apply(fig, self.title)

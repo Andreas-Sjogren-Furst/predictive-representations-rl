@@ -20,7 +20,7 @@ def test_train_then_inspect_with_the_cli(tmp_path):
     args = ["--updates", "5", "--episodes", "2", "--max-steps", "10", "--trajectories", "1"]
     trained = runner.invoke(app, ["train", "four-rooms", "--output", str(out), *args])
     assert trained.exit_code == 0, trained.output
-    assert "Trained run: fb_four_rooms_seed_7" in trained.output
+    assert "Trained run: fb_four_rooms_seed7" in trained.output
     for name in (
         "checkpoint.pt",
         "dataset.npz",

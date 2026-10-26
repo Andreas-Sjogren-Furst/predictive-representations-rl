@@ -13,7 +13,7 @@ from aeris.analysis.goal_policy import build_goal_oracle
 from aeris.cli.main import app
 from aeris.domain import EvaluationRecord, MetricValue, PolicySnapshot, TrainingMetricRecord
 from aeris.environments import FourRooms
-from conftest import write_four_rooms_run
+from conftest import synthetic_suite_report, write_four_rooms_run
 
 runner = CliRunner()
 
@@ -172,3 +172,23 @@ def test_analysis_invalid_environment_exits_cleanly(tmp_path):
     result = runner.invoke(app, ["analysis", "four-rooms", str(directory), "--no-plots"])
     assert result.exit_code == 1
     assert "only Four Rooms runs are supported" in result.output
+
+
+def test_runs_summary_groups_completed_runs(tmp_path):
+    for seed, name in enumerate(("a", "b"), start=1):
+        _run(tmp_path / name).write_report(synthetic_suite_report(seed=seed))
+    write_four_rooms_run(tmp_path / "unfinished", status="running")
+    result = runner.invoke(
+        app, ["runs", "summary", "--root", str(tmp_path), "-m", "zero-shot · all"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "name = fb_demo  (2 runs, seeds 42, 42)" in result.output
+    assert "± 0.000  (n=2)" in result.output
+    data = json.loads(
+        runner.invoke(app, ["runs", "summary", "--root", str(tmp_path), "--json"]).stdout
+    )
+    assert data[0]["metrics"]["final evaluation · success_rate"] == {
+        "mean": 0.5,
+        "std": 0.0,
+        "n": 2,
+    }

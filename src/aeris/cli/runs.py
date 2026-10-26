@@ -82,3 +82,56 @@ def plot_command(run: RunArg, root: RootOpt = DEFAULT_ROOT) -> None:
         typer.echo("Nothing to plot: the run has no recorded metrics, snapshots or trajectories")
     for path in made:
         typer.echo(f"Figure: {path}")
+
+
+@app.command("summary")
+def summary_command(
+    root: Annotated[Path, typer.Option("--root", "-r", help="Runs directory.")] = DEFAULT_ROOT,
+    group_by: Annotated[
+        str,
+        typer.Option(
+            "--group-by",
+            help="Recorded value to group by: name, seed, dataset.origin, agent.<key>, …",
+        ),
+    ] = "name",
+    metric: Annotated[
+        list[str] | None, typer.Option("--metric", "-m", help="Only metrics containing this text.")
+    ] = None,
+    as_json: JsonOpt = False,
+) -> None:
+    """Mean ± std across seeds of every completed run's headline numbers, per group."""
+    from aeris.workflows.summary import summarize_runs
+
+    with cli_errors():
+        groups = summarize_runs(root, by=group_by)
+    selected = [
+        (
+            group,
+            {k: v for k, v in group.metrics.items() if not metric or any(m in k for m in metric)},
+        )
+        for group in groups
+    ]
+    if as_json:
+        data = [
+            {
+                "group": group.group,
+                "runs": list(group.runs),
+                "seeds": list(group.seeds),
+                "metrics": {
+                    k: {"mean": s.mean, "std": s.std, "n": s.n} for k, s in metrics.items()
+                },
+            }
+            for group, metrics in selected
+        ]
+        typer.echo(json.dumps(data, indent=2))
+        return
+    if not groups:
+        typer.echo(f"No completed runs in {root}")
+        return
+    for group, metrics in selected:
+        seeds = ", ".join(map(str, group.seeds))
+        typer.echo(f"{group_by} = {group.group}  ({len(group.runs)} runs, seeds {seeds})")
+        width = max((len(k) for k in metrics), default=0)
+        for name, stat in metrics.items():
+            typer.echo(f"  {name:<{width}}  {stat.mean:7.3f} ± {stat.std:.3f}  (n={stat.n})")
+        typer.echo("")

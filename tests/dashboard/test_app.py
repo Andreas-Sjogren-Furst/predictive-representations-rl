@@ -34,6 +34,9 @@ def test_app_renders_built_in_layouts_and_saves_edits(tmp_path, four_rooms_run, 
     at.sidebar.multiselect[0].set_value(["first", "second"]).run()
     at.sidebar.selectbox[0].set_value("Compare runs").run()
     assert not at.exception
+    # The group summary groups by experiment name, even though the previous layout had a
+    # different panel at the same position (widget state must not leak between layouts).
+    assert "name=fb_demo (n=2)" in at.dataframe[0].value.columns
 
     at.sidebar.toggle[0].set_value(True).run()  # edit mode
     [b for b in at.button if b.label == "✕ remove"][0].click().run()

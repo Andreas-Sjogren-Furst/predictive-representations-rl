@@ -7,8 +7,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from aeris.agents.fb.reports import FBCheckpointReport
+from aeris.analysis.seeds import SeedStatistic, key_metrics, summarize
 from aeris.dashboard.data import RunData
 from aeris.dashboard.panels.base import Choice, Option, Output, Panel, Table
+from aeris.dashboard.panels.grouping import group_choice, group_runs, label
 from aeris.domain.reports import TabularPolicyReport, ZeroShotSuiteReport
 
 
@@ -118,3 +120,47 @@ class RunComparison(Panel):
 def _strategy(run: RunData, key: str) -> Any:
     strategy = run.manifest.experiment.training.strategy
     return None if strategy is None else strategy.settings.get(key)
+
+
+@dataclass(frozen=True)
+class GroupSummaryTable(Panel):
+    name = "group_summary"
+    title = "Group summary"
+    scope = "runs"
+    description = "Mean ± std across the runs (seeds) of each group, for every headline number."
+
+    def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
+        choice = group_choice(runs)
+        default = "name" if "name" in choice.choices else choice.default
+        return (Choice(choice.key, choice.label, choice.choices, default),)
+
+    def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
+        groups = group_runs(runs, options["group_by"])
+        columns = {
+            label(group, members): {
+                name: stat
+                for name in dict.fromkeys(
+                    n for run in members for n in key_metrics(run.evaluations, run.reports.values())
+                )
+                if (
+                    stat := summarize(
+                        key_metrics(run.evaluations, run.reports.values()).get(name)
+                        for run in members
+                    )
+                )
+                is not None
+            }
+            for group, members in groups.items()
+        }
+        metrics = list(dict.fromkeys(name for stats in columns.values() for name in stats))
+        rows = [
+            {"metric": name, **{group: _stat(stats.get(name)) for group, stats in columns.items()}}
+            for name in metrics
+        ]
+        return Table(rows, caption=f"{self.title} · grouped by {options['group_by']}")
+
+
+def _stat(stat: SeedStatistic | None) -> str:
+    if stat is None:
+        return ""
+    return f"{stat.mean:.3f}" if stat.n == 1 else f"{stat.mean:.3f} ± {stat.std:.3f} (n={stat.n})"

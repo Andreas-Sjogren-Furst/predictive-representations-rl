@@ -40,6 +40,8 @@ uv run aeris analysis fb-checkpoint fb_four_rooms       # FB checkpoint vs exact
 uv run aeris analysis zero-shot fb_four_rooms           # zero-shot scores on the 120-task suite
 uv run aeris analysis representations fb_four_rooms     # save B, F and exact densities for the dashboard
 uv run aeris dashboard                                  # browse and compare runs interactively
+uv run aeris sweep four-rooms --name fb --seeds 0-4 --lsf --updates 40000   # seeds as an LSF job array
+uv run aeris runs summary                               # mean ± std across seeds per experiment
 ```
 
 A run can be named by its directory, its folder name under `runs/` (`--root` to change), or its
@@ -84,6 +86,7 @@ that a component really satisfies one.
 
 ## Documentation
 
+- [Seeds, sweeps and summaries](docs/experiments/sweeps.md)
 - [Run dashboard](docs/dashboard.md): viewing, comparing and laying out runs; adding panels
 - [Architecture overview](docs/architecture/overview.md): layers, dependency rules, where validation lives, extending AERIS
 - [Domain models](docs/architecture/domain_models.md), [component contracts](docs/architecture/component_contracts.md), and the founding [experiment lifecycle](docs/architecture/experiment_lifecycle.md) specification

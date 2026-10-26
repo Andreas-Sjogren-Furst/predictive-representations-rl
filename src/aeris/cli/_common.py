@@ -40,6 +40,6 @@ def cli_errors() -> Iterator[None]:
         hint = f" (install the '{extra}' extra: uv sync --extra {extra})" if extra else ""
         typer.echo(f"Error: {exc}{hint}", err=True)
         raise typer.Exit(code=1) from exc
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc

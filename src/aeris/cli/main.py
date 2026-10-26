@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from aeris.cli import analysis, dashboard, runs, train
+from aeris.cli import analysis, dashboard, runs, sweep, train
 
 app = typer.Typer(
     name="aeris",
@@ -12,6 +12,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(train.app, name="train")
+app.add_typer(sweep.app, name="sweep")
 app.add_typer(runs.app, name="runs")
 app.add_typer(analysis.app, name="analysis")
 app.command("dashboard")(dashboard.dashboard)

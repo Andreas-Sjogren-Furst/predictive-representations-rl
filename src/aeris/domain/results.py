@@ -19,6 +19,26 @@ class RunManifest(JsonRecord):
     selected_checkpoint: str | None = None
     error: str | None = None
 
+    def setting(self, path: str) -> Any:
+        """A recorded value by path: ``name``, ``seed``, or ``<component>.<key>``.
+
+        Components: ``agent``, ``environment`` and ``dataset`` (their settings),
+        ``training`` (the strategy's settings) and ``evaluation`` (the
+        protocol's settings). Missing values are None.
+        """
+        experiment = self.experiment
+        if path in ("name", "seed"):
+            return getattr(experiment, path)
+        component, _, key = path.partition(".")
+        spec = {
+            "agent": experiment.agent,
+            "environment": experiment.environment,
+            "dataset": experiment.dataset,
+            "training": experiment.training.strategy,
+            "evaluation": experiment.evaluation.protocol if experiment.evaluation else None,
+        }.get(component)
+        return None if spec is None or not key else spec.settings.get(key)
+
     def __post_init__(self) -> None:
         require_identifier("run_id", self.run_id)
         if self.status not in get_args(RunStatus):

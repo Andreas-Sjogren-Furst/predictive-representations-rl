@@ -132,8 +132,8 @@ names its artifact file), a workflow that checks eligibility and saves the repor
 Implemented: typed domain and contracts; offline training with fixed, fingerprinted data;
 goal-reaching evaluation with trajectory capture; zero-shot task suites (rewards as task types the
 environment defines, inference through the `TaskConditioner` contract, exact normalized scores); atomic, typed run records with failure status;
-`SpaceSpec` compatibility checks; exact-model analyses with typed reports; the `aeris` CLI; static
-type checking and CI.
+`SpaceSpec` compatibility checks; exact-model analyses with typed reports; seed sweeps (local or LSF)
+with mean ± std summaries across seeds; the `aeris` CLI and dashboard; static type checking and CI.
 
 Not implemented yet, so the specification's rules hold only partly:
 

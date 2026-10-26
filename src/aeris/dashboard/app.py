@@ -71,6 +71,9 @@ def render_panel(
         st.warning(f"Unknown panel '{spec.panel}' in this layout.")
         return spec
     options = dict(spec.options)
+    # Streamlit keeps widget state by key: scope keys to the layout and panel type so a
+    # different layout (or panel) at the same position does not inherit stale values.
+    key = f"{layout.name}|{index}|{spec.panel}"
     with st.container(border=True):
         if panel.scope == "run":
             labels = [run.label for run in runs]
@@ -83,13 +86,13 @@ def render_panel(
             if panel.description:
                 st.caption(panel.description)
             if panel.scope == "run" and len(runs) > 1:
-                chosen = st.selectbox("Run", labels, index=labels.index(chosen), key=f"{index}-run")
+                chosen = st.selectbox("Run", labels, index=labels.index(chosen), key=f"{key}|run")
                 options[RUN_OPTION] = chosen
                 panel_runs = [runs[labels.index(chosen)]]
             resolved = panel.resolve_options(panel_runs, options)
             for option in panel.options(panel_runs):
                 options[option.key] = option_widget(
-                    option, resolved[option.key], f"{index}-{option.key}"
+                    option, resolved[option.key], f"{key}|{option.key}"
                 )
             if editing:
                 width = st.slider(
@@ -97,7 +100,7 @@ def render_panel(
                     1,
                     layout.columns,
                     min(spec.width, layout.columns),
-                    key=f"{index}-w",
+                    key=f"{key}|width",
                 )
                 spec = replace(spec, width=width)
         problem = panel.missing(panel_runs)
@@ -112,7 +115,7 @@ def render_panel(
             elif isinstance(output, Message):
                 (st.warning if output.kind == "warning" else st.info)(output.text)
             else:
-                st.plotly_chart(output, width="stretch", key=f"{index}-chart")
+                st.plotly_chart(output, width="stretch", key=f"{key}|chart")
     return replace(
         spec, options={k: list(v) if isinstance(v, tuple) else v for k, v in options.items()}
     )

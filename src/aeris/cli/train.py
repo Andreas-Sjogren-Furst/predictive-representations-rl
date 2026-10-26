@@ -20,9 +20,15 @@ class Dataset(StrEnum):
 
 @app.command("four-rooms")
 def four_rooms(
+    name: Annotated[
+        str, typer.Option(help="Experiment name shared by this configuration's seeds.")
+    ] = "fb_four_rooms",
     output: Annotated[
-        Path, typer.Option("--output", "-o", help="New, empty run directory.")
-    ] = Path("runs/fb_four_rooms"),
+        Path | None,
+        typer.Option(
+            "--output", "-o", help="New, empty run directory [default: runs/NAME_seedSEED]."
+        ),
+    ] = None,
     dataset: Annotated[
         Dataset,
         typer.Option(help="Full state-action coverage ('oracle') or random collection."),
@@ -49,11 +55,16 @@ def four_rooms(
     ] = False,
 ) -> None:
     """Train discrete FB offline on Four Rooms (needs 'fb-torch'); not a paper reproduction."""
-    from aeris.workflows.four_rooms_training import FourRoomsFBTraining, train_four_rooms_fb
+    from aeris.workflows.four_rooms_training import (
+        FourRoomsFBTraining,
+        run_name,
+        train_four_rooms_fb,
+    )
 
     with cli_errors():
         settings = FourRoomsFBTraining(
-            output=output,
+            output=output if output is not None else Path("runs") / run_name(name, seed),
+            name=name,
             dataset=dataset.value,
             transitions=transitions,
             updates=updates,

@@ -11,9 +11,11 @@ from typing import Any
 
 import plotly.graph_objects as go
 
+from aeris.analysis.seeds import summarize
 from aeris.dashboard.data import RunData
 from aeris.dashboard.panels.base import STYLE, Choice, Message, Option, Output, Panel, Table
 from aeris.dashboard.panels.grid import ARROWS, ENV, add_goal, grid_figure
+from aeris.dashboard.panels.grouping import group_choice, group_runs, label
 from aeris.domain.reports import ZeroShotSuiteReport
 
 
@@ -56,23 +58,37 @@ class SuiteScores(SuitePanel):
     name = "suite_scores"
     title = "Zero-shot score by task family"
     scope = "runs"
-    description = "Mean normalized score (0 = random policy, 1 = optimal) per task family and run."
+    description = (
+        "Mean normalized score (0 = random, 1 = optimal) per family; groups show ± std over seeds."
+    )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
-        return (_protocol_choice(runs),)
+        return (_protocol_choice(runs), group_choice(runs))
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         protocol = options["protocol"]
         fig = go.Figure()
         lowest = 0.0
-        for run in runs:
-            report = _suite(run)
-            assert report is not None
-            families = list(report.mean_score)
-            values = [report.mean_score[f].get(protocol) for f in families]
-            lowest = min([lowest, *(v for v in values if v is not None)])
+        for group, members in group_runs(runs, options["group_by"]).items():
+            reports = [r for run in members if (r := _suite(run)) is not None]
+            families = list(dict.fromkeys(f for r in reports for f in r.mean_score))
+            stats = [
+                summarize(r.mean_score.get(f, {}).get(protocol) for r in reports) for f in families
+            ]
+            means = [s.mean if s else None for s in stats]
+            lowest = min([lowest, *(m for m in means if m is not None)])
             fig.add_trace(
-                go.Bar(x=families, y=values, name=run.label, text=[_fmt(v) for v in values])
+                go.Bar(
+                    x=families,
+                    y=means,
+                    name=label(group, members),
+                    text=[_fmt(m) for m in means],
+                    error_y={
+                        "type": "data",
+                        "array": [s.std if s else 0 for s in stats],
+                        "visible": len(members) > 1,
+                    },
+                )
             )
         fig.update_layout(barmode="group")
         fig.update_yaxes(title="normalized score", range=[lowest - 0.05, 1.05])

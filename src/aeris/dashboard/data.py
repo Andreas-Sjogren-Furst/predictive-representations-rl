@@ -6,19 +6,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from aeris.agents.fb.reports import FBCheckpointReport
 from aeris.agents.fb.representations import FBRepresentations
+from aeris.analysis.seeds import REPORT_TYPES
 from aeris.data.run_directory import RunDirectory
 from aeris.domain.artifacts import PolicySnapshot
-from aeris.domain.reports import AnalysisReport, TabularPolicyReport, ZeroShotSuiteReport
+from aeris.domain.reports import AnalysisReport
 from aeris.domain.results import EvaluationRecord, RunManifest, TrainingMetricRecord
 from aeris.domain.trajectory import EvaluationTrajectory
 
-REPORT_TYPES: tuple[type[AnalysisReport], ...] = (
-    TabularPolicyReport,
-    FBCheckpointReport,
-    ZeroShotSuiteReport,
-)
 SNAPSHOT_LABELS = ("initial", "final")
 
 
@@ -40,10 +35,8 @@ class RunData:
         return self.reports.get(report_type.__name__)
 
     def setting(self, path: str) -> object:
-        """A component setting by dotted path, e.g. ``agent.hidden_dim`` or ``dataset.origin``."""
-        component, key = path.split(".", 1)
-        spec = getattr(self.manifest.experiment, component, None)
-        return None if spec is None else spec.settings.get(key)
+        """A recorded setting by path (see ``RunManifest.setting``)."""
+        return self.manifest.setting(path)
 
 
 def load_run(root: str | Path) -> RunData:
