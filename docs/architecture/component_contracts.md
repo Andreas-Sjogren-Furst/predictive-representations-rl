@@ -69,9 +69,11 @@ All these capabilities are grouped by component; there is **no universal do-ever
 from aeris.contracts import Agent, TrainableAgent
 from aeris.domain import ActionRequest, ActionResult, MetricValue
 
+
 class RandomPolicy:
     def act(self, request: ActionRequest) -> ActionResult:
         return ActionResult(action=0)  # example only; real action must be valid
+
 
 # No inheritance needed: RandomPolicy satisfies Agent structurally.
 ```

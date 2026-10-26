@@ -87,7 +87,7 @@ def _decode(tp: Any, value: Any, path: str) -> Any:
         if value not in args:
             raise ValueError(f"{path}: expected one of {args!r}, got {value!r}")
         return value
-    if is_dataclass(tp):
+    if isinstance(tp, type) and is_dataclass(tp):
         return _decode_dataclass(tp, value, path)
     if origin is tuple:
         if not isinstance(value, (list, tuple)):
@@ -115,7 +115,7 @@ def _decode(tp: Any, value: Any, path: str) -> Any:
     raise TypeError(f"{path}: unsupported field type {tp!r}")
 
 
-def _decode_dataclass(cls: type[T], value: Any, path: str) -> T:
+def _decode_dataclass(cls: type[Any], value: Any, path: str) -> Any:
     if not isinstance(value, Mapping):
         raise ValueError(f"{path}: expected an object, got {type(value).__name__}")
     hints = get_type_hints(cls)

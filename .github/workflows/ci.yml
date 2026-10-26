@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint, types and tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Install the project, dev tools and the viz extra from uv.lock
+        run: uv sync --locked --extra viz
+
+      # The fb-torch extra resolves to the multi-GB CUDA build; CI only needs CPU torch.
+      - name: Install CPU-only PyTorch
+        run: uv pip install "torch>=2.3,<3" --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Ruff lint
+        run: uv run --no-sync ruff check .
+
+      - name: Ruff format
+        run: uv run --no-sync ruff format --check .
+
+      - name: Mypy
+        run: uv run --no-sync mypy
+
+      - name: Pytest
+        run: uv run --no-sync pytest -q

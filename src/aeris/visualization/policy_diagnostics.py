@@ -26,7 +26,7 @@ def render_optimal_policy(oracle: GoalOracle, output_file: str | Path) -> Path:
         if i == oracle.goal_index:
             continue
         symbols = "".join(
-            ACTION_ARROWS[a] for a in np.flatnonzero(oracle.optimal.optimal_actions[i])
+            ACTION_ARROWS[int(a)] for a in np.flatnonzero(oracle.optimal.optimal_actions[i])
         )
         ax.text(col, row, symbols, ha="center", va="center", fontsize=8.5)
     ax.set_title("Exact optimal actions · all equally optimal actions shown")

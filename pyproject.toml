@@ -24,6 +24,7 @@ packages = ["src/aeris"]
 
 [dependency-groups]
 dev = [
+    "mypy>=1.13",
     "pytest>=8,<10",
     "ruff>=0.6",
 ]
@@ -38,6 +39,13 @@ viz = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "examples"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
 
 [tool.ruff]
 line-length = 100

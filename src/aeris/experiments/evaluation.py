@@ -84,7 +84,7 @@ def evaluate_goal_policy(
                 break
         successes += int(success)
         lengths.append(length)
-        if capture:
+        if capture and on_trajectory is not None:
             on_trajectory(
                 EvaluationTrajectory(
                     run_id=run_id,

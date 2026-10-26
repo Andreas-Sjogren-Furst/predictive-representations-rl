@@ -31,7 +31,7 @@ def style_grid_axes(ax, env: FourRooms) -> None:
     ax.set_yticks(range(env.HEIGHT))
 
 
-def draw_grid(ax, env: FourRooms, goal: tuple[int, int]) -> None:
+def draw_grid(ax, env: FourRooms, goal: tuple[int, ...]) -> None:
     """Draw walls, free cells and the goal marker."""
     from matplotlib.patches import Rectangle
 

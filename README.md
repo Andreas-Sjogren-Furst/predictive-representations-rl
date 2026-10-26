@@ -68,7 +68,13 @@ Dependencies point inwards: `domain` imports nothing else from AERIS, implementa
 uv run pytest
 uv run ruff check .
 uv run ruff format .
+uv run mypy
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same checks on Python 3.11 and 3.12 for every push to
+`main` and every pull request, with a CPU-only PyTorch build. mypy checks `src/` and `examples/`;
+the protocol contracts are structural, so the type checker, not `isinstance`, is what verifies
+that a component really satisfies one.
 
 ## Documentation
 

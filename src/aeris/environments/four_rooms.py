@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 
+from aeris.domain.artifacts import DiscreteState
 from aeris.domain.environment import ResetResult, StepResult
 from aeris.domain.experience import Transition
 from aeris.domain.spaces import DiscreteActionSpec, ObservationSpec, SpaceSpec
@@ -61,11 +62,11 @@ class FourRooms:
         self._steps = 0
         self._done = False
 
-    def _check_position(self, pos: tuple[int, int]) -> None:
+    def _check_position(self, pos: DiscreteState) -> None:
         if pos not in self.positions:
             raise ValueError(f"not a traversable grid position: {pos!r}")
 
-    def observation_for(self, pos: tuple[int, int]) -> np.ndarray:
+    def observation_for(self, pos: DiscreteState) -> np.ndarray:
         self._check_position(pos)
         obs = np.zeros(self.observation_dim, dtype=np.float32)
         obs[pos[0] * self.WIDTH + pos[1]] = 1.0
@@ -75,7 +76,7 @@ class FourRooms:
         arr = np.asarray(observation)
         if arr.shape != (self.observation_dim,) or not np.isfinite(arr).all():
             raise ValueError("expected a finite one-hot grid observation")
-        ix = int(arr.argmax())
+        ix = int(np.argmax(arr))
         if arr[ix] != 1 or np.count_nonzero(arr) != 1:
             raise ValueError("expected a one-hot grid observation")
         pos = divmod(ix, self.WIDTH)

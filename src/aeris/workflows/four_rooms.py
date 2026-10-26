@@ -24,8 +24,8 @@ TRAJECTORY_CHECKPOINTS = {"initial": "initial_in_memory", "final": "checkpoint.p
 RunRef = str | Path | RunDirectory
 
 
-def _store(run: RunRef) -> RunDirectory:
-    return run if isinstance(run, RunDirectory) else RunDirectory(run)
+def _store(run_ref: RunRef) -> RunDirectory:
+    return run_ref if isinstance(run_ref, RunDirectory) else RunDirectory(run_ref)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,9 +40,9 @@ class FourRoomsRun:
     max_steps: int
 
 
-def open_four_rooms_run(run: RunRef) -> FourRoomsRun:
+def open_four_rooms_run(run_ref: RunRef) -> FourRoomsRun:
     """Open a run, requiring a completed Four Rooms experiment with exactly one goal task."""
-    store = _store(run)
+    store = _store(run_ref)
     manifest = store.read_manifest()
     if manifest.status != "completed":
         raise ValueError("run must be completed")
@@ -65,12 +65,12 @@ def open_four_rooms_run(run: RunRef) -> FourRoomsRun:
     )
 
 
-def analyze_saved_policies(run: RunRef, *, gamma: float = 0.99) -> TabularPolicyAnalysis:
+def analyze_saved_policies(run_ref: RunRef, *, gamma: float = 0.99) -> TabularPolicyAnalysis:
     """Compare the run's saved policy snapshots with the exact optimal policy, without torch.
 
     Saves ``analysis/tabular_policy_v1.json``; the original artifacts are unchanged.
     """
-    run = open_four_rooms_run(run)
+    run = open_four_rooms_run(run_ref)
     snapshots = {}
     for label in SNAPSHOT_LABELS:
         snapshot = run.store.read_policy_snapshot(label)
@@ -91,7 +91,7 @@ def analyze_saved_policies(run: RunRef, *, gamma: float = 0.99) -> TabularPolicy
     return analysis
 
 
-def diagnose_fb_checkpoint(run: RunRef) -> FBCheckpointReport:
+def diagnose_fb_checkpoint(run_ref: RunRef) -> FBCheckpointReport:
     """Validate the run's trusted FB checkpoint against exact occupancies (needs torch).
 
     Requires the saved full-coverage oracle dataset, verified by fingerprint and
@@ -100,7 +100,7 @@ def diagnose_fb_checkpoint(run: RunRef) -> FBCheckpointReport:
     from aeris.agents.fb.checkpoint import load_agent
     from aeris.analysis.fb_representation import diagnose_fb_representation
 
-    run = open_four_rooms_run(run)
+    run = open_four_rooms_run(run_ref)
     dataset = run.manifest.experiment.dataset
     settings = dataset.settings if dataset is not None else {}
     if settings.get("origin") != "oracle":
@@ -125,7 +125,7 @@ def diagnose_fb_checkpoint(run: RunRef) -> FBCheckpointReport:
     return report
 
 
-def render_run_figures(run: RunRef) -> tuple[Path, ...]:
+def render_run_figures(run_ref: RunRef) -> tuple[Path, ...]:
     """Plot every recorded artifact of a run into ``figures/``; no torch or live policy."""
     from aeris.visualization.four_rooms import (
         render_evaluation_success,
@@ -134,7 +134,7 @@ def render_run_figures(run: RunRef) -> tuple[Path, ...]:
         render_trajectory,
     )
 
-    run = open_four_rooms_run(run)
+    run = open_four_rooms_run(run_ref)
     store, output = run.store, run.store.figures_dir
     made: list[Path] = []
     training = list(store.read_training_metrics())
@@ -156,16 +156,16 @@ def render_run_figures(run: RunRef) -> tuple[Path, ...]:
     return tuple(made)
 
 
-def render_policy_figures(run: RunRef, analysis: TabularPolicyAnalysis) -> tuple[Path, ...]:
+def render_policy_figures(run_ref: RunRef, analysis: TabularPolicyAnalysis) -> tuple[Path, ...]:
     """Plot the optimal policy and each snapshot's policy gap into ``figures/``."""
     from aeris.visualization.policy_diagnostics import render_tabular_policy_figures
 
-    return render_tabular_policy_figures(analysis, _store(run).figures_dir)
+    return render_tabular_policy_figures(analysis, _store(run_ref).figures_dir)
 
 
-def render_fb_figures(run: RunRef, report: FBCheckpointReport) -> tuple[Path, ...]:
+def render_fb_figures(run_ref: RunRef, report: FBCheckpointReport) -> tuple[Path, ...]:
     """Plot the FB action-alignment map into ``figures/``."""
     from aeris.visualization.fb_checkpoint import render_fb_action_alignment
 
-    path = _store(run).figures_dir / "fb_action_alignment.png"
+    path = _store(run_ref).figures_dir / "fb_action_alignment.png"
     return (render_fb_action_alignment(report, path),)
