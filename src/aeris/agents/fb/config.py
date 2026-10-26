@@ -22,6 +22,9 @@ class DiscreteFBConfig:
     learning_rate: float = 5e-4
     gamma: float = 0.99
     polyak: float = 0.95  # retention coefficient for target networks
+    # Gradient updates between Polyak target updates. Upstream soft-updates once per
+    # cycle of 40 batches; updating after every step stops FB from learning structure.
+    target_update_period: int = 40
     regularization_coefficient: float = 1.0
     temperature: float = 200.0
     exploration_epsilon: float = 1.0
@@ -33,6 +36,7 @@ class DiscreteFBConfig:
         for key in ("observation_dim", "representation_dim", "hidden_dim"):
             require_int(key, getattr(self, key), minimum=1)
         require_int("num_actions", self.num_actions, minimum=2)
+        require_int("target_update_period", self.target_update_period, minimum=1)
         if not (0 <= self.gamma < 1):
             raise ValueError("gamma must be in [0, 1)")
         if not (0 <= self.polyak < 1):

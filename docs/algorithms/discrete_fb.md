@@ -26,7 +26,7 @@ the implementation minimizes
 
 `L_FB = 0.5 mean_ij ( F(s_i,a_i,z_i) · B(s_other_j) - gamma M_target[i,j] )^2 - mean_i F(s_i,a_i,z_i) · B(s_i)`
 
-plus the exact *stop-gradient placement* in the reference backward-feature regularizer, weighted by `regularization_coefficient`. Targets are updated **after** the optimizer step using `target = polyak * target + (1 - polyak) * source`.
+plus the exact *stop-gradient placement* in the reference backward-feature regularizer, weighted by `regularization_coefficient`. Targets are updated after the optimizer step using `target = polyak * target + (1 - polyak) * source`, **once every `target_update_period` gradient updates** (default 40). Upstream's `learn()` soft-updates the targets once per cycle, after `n_batches = 40` gradient steps, not after every step. An earlier AERIS version updated after every step; with `polyak = 0.95` its target then tracked the online network within about 20 updates, and on Four Rooms F·B learned only the constant part of the occupancy (correlation with the exact occupancy stayed at 0.000 over 8000 updates) while B collapsed to nearly one vector. With the upstream cadence the correlation rose steadily, to 0.50 after 8000 updates.
 
 The objective intentionally does **not** use transition rewards or dones, consistent with the inspected reference implementation. That choice must be reconsidered for absorbing terminals in future environments, rather than silently changing the baseline.
 

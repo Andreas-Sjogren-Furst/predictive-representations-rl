@@ -268,10 +268,11 @@ class DiscreteFBAgent:
         self.optimizer.zero_grad(set_to_none=True)
         total_loss.backward()
         self.optimizer.step()
-        with torch.no_grad():
-            self._polyak_update(self.forward_target_network, self.forward_network)
-            self._polyak_update(self.backward_target_network, self.backward_network)
         self.updates += 1
+        if self.updates % self.config.target_update_period == 0:
+            with torch.no_grad():
+                self._polyak_update(self.forward_target_network, self.forward_network)
+                self._polyak_update(self.backward_target_network, self.backward_network)
         return (
             MetricValue("fb_loss", float(fb_loss.detach()), "unitless", "instant"),
             MetricValue("fb_regularization", float(reg_loss.detach()), "unitless", "instant"),

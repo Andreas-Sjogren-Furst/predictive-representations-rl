@@ -169,3 +169,28 @@ def test_single_rewarded_goal_sample_infers_exactly_the_goal_condition():
     goal = np.array([0.5, -1.0, 2.0, 0.0], dtype=np.float32)
     inferred = a.infer_condition(TaskSpec(task_id="goal"), [(goal, 1.0)])
     assert torch.equal(inferred, a.goal_condition(goal))
+
+
+@pytest.mark.parametrize("period", [1, 40])
+def test_targets_move_only_every_target_update_period(period):
+    a = DiscreteFBAgent(
+        DiscreteFBConfig(
+            observation_dim=4,
+            num_actions=3,
+            representation_dim=5,
+            hidden_dim=16,
+            task_sampling="uniform_ball",
+            seed=2,
+            target_update_period=period,
+        )
+    )
+    b = batch()
+
+    def target_weights():
+        return a.forward_target_network.forward_out.weight.detach().clone()
+
+    for step in range(1, period + 1):
+        before = target_weights()
+        a.update(b)
+        moved = not torch.equal(target_weights(), before)
+        assert moved == (step % period == 0), step
