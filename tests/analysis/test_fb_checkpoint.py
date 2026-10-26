@@ -8,7 +8,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 from aeris.agents.fb import DiscreteFBAgent, DiscreteFBConfig
-from aeris.analysis.fb_checkpoint import analyze_fb_checkpoint
+from aeris.analysis.four_rooms.fb_checkpoint import analyze_fb_checkpoint
 from aeris.environments import FourRooms
 
 

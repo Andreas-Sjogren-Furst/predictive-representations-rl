@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from aeris.analysis.four_rooms import (
+from aeris.analysis.four_rooms.four_rooms import (
     FourRoomsRun,
     build_four_rooms_oracle,
     load_four_rooms_run,

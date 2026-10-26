@@ -40,7 +40,7 @@ def analyze(args: argparse.Namespace) -> None:
 
 
 def diagnose(args: argparse.Namespace) -> None:
-    from aeris.analysis.fb_checkpoint import analyze_fb_checkpoint
+    from aeris.analysis.four_rooms.fb_checkpoint import analyze_fb_checkpoint
 
     report = analyze_fb_checkpoint(args.run_dir)
     for name in (
