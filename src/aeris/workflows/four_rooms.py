@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from aeris.agents.fb.reports import FBCheckpointReport
+from aeris.agents.fb.representations import FBRepresentations
 from aeris.analysis.goal_policy import (
     TabularPolicyAnalysis,
     analyze_policy_snapshots,
@@ -242,6 +243,49 @@ def evaluate_zero_shot_goals(
     )
     run.store.write_report(report)
     return report
+
+
+def export_fb_representations(
+    run_ref: RunRef, *, goals: Sequence[Position] | None = None
+) -> FBRepresentations:
+    """Save B for every state and F, policy and exact density per goal (needs torch).
+
+    The state density rho is the frequency of each cell among the run's training
+    observations, so the learned-vs-exact comparison is valid for any dataset,
+    not only the uniform oracle one. Saves ``analysis/fb_representations_v1.npz``,
+    which the dashboard's representation panels read.
+    """
+    from aeris.agents.fb.checkpoint import load_agent
+    from aeris.analysis.fb_representation import compute_fb_representations
+
+    use_single_cpu_thread()
+    run = open_four_rooms_run(run_ref)
+    dataset_spec = run.manifest.experiment.dataset
+    if dataset_spec is None:
+        raise ValueError(
+            "representations need the run's saved training dataset for its state density"
+        )
+    dataset = TransitionFile(
+        run.store.dataset_path, expected_sha256=dataset_spec.settings.get("sha256")
+    )
+    agent = load_agent(run.store.checkpoint_path)
+    agent.config.spec.require_compatible(run.env.spec, consumer="FB checkpoint")
+    _require_recorded_config(run.manifest, asdict(agent.config))
+    dynamics = run.env.tabular_dynamics()
+    counts = np.zeros(dynamics.num_states)
+    for observation in dataset.observations:
+        counts[dynamics.index_of(run.env.position_of(observation))] += 1
+    representations = compute_fb_representations(
+        agent,
+        run.env,
+        dynamics,
+        goals if goals is not None else dynamics.states,
+        state_density=counts / counts.sum(),
+        run_id=run.manifest.run_id,
+        checkpoint=run.store.checkpoint_path.name,
+    )
+    run.store.write_arrays(FBRepresentations.ARTIFACT_NAME, *representations.to_arrays())
+    return representations
 
 
 def _reaches(goal_observation: np.ndarray) -> Callable[[Any], bool]:

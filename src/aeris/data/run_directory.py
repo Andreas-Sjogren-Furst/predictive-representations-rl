@@ -10,20 +10,27 @@ Layout::
     dataset.npz              fixed training transitions (see data.artifacts)
     checkpoint.pt            trusted agent checkpoint (written by the agent package)
     analysis/<report>.json   AnalysisReport subclasses
+    analysis/<name>.npz      named array artifacts with JSON metadata (e.g. representations)
     figures/                 rendered plots
 
-Implements the RunRecorder, TrajectoryRecorder, RunReader and ArtifactStore contracts.
+Implements the RunRecorder, TrajectoryRecorder, RunReader, ArtifactStore and ArrayStore
+contracts.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, TypeVar
 
-from aeris.data.artifacts import read_policy_snapshot_npz, write_policy_snapshot_npz
+from aeris.data.artifacts import (
+    read_arrays_npz,
+    read_policy_snapshot_npz,
+    write_arrays_npz,
+    write_policy_snapshot_npz,
+)
 from aeris.domain.artifacts import PolicySnapshot
 from aeris.domain.reports import AnalysisReport
 from aeris.domain.results import EvaluationRecord, RunManifest, TrainingMetricRecord
@@ -125,6 +132,19 @@ class RunDirectory:
     def read_report(self, report_type: type[ReportT]) -> ReportT | None:
         path = self.report_path(report_type)
         return _read_record(path, report_type) if path.exists() else None
+
+    # ArrayStore
+    def arrays_path(self, name: str) -> Path:
+        return self.root / "analysis" / f"{name}.npz"
+
+    def write_arrays(
+        self, name: str, arrays: Mapping[str, Any], metadata: Mapping[str, Any]
+    ) -> Path:
+        return write_arrays_npz(self.arrays_path(name), arrays, metadata)
+
+    def read_arrays(self, name: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        path = self.arrays_path(name)
+        return read_arrays_npz(path) if path.exists() else None
 
     # Helpers
     def _append(self, filename: str, obj: dict[str, Any]) -> None:

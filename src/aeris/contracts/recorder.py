@@ -1,5 +1,5 @@
-from collections.abc import Iterator
-from typing import Protocol, TypeVar, runtime_checkable
+from collections.abc import Iterator, Mapping
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 from aeris.domain.artifacts import PolicySnapshot
 from aeris.domain.reports import AnalysisReport
@@ -51,3 +51,18 @@ class ArtifactStore(Protocol):
     def write_report(self, report: AnalysisReport) -> None: ...
 
     def read_report(self, report_type: type[ReportT]) -> ReportT | None: ...
+
+
+@runtime_checkable
+class ArrayStore(Protocol):
+    """Named numeric arrays with JSON metadata, for artifacts too large for JSON reports.
+
+    Arrays are left untyped here so contracts stay free of NumPy; algorithm
+    packages wrap them in typed records (e.g. ``agents.fb.FBRepresentations``).
+    """
+
+    def write_arrays(
+        self, name: str, arrays: Mapping[str, Any], metadata: Mapping[str, Any]
+    ) -> Any: ...
+
+    def read_arrays(self, name: str) -> tuple[dict[str, Any], dict[str, Any]] | None: ...

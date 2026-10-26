@@ -122,3 +122,26 @@ def zero_shot(
         typer.echo(f"  {protocol}: mean success {rate:.1%}{note}")
     typer.echo(f"Report: {store.report_path(type(report))}")
     _echo_paths("Figure", figures)
+
+
+@app.command("representations")
+def representations(
+    run: RunArg,
+    root: RootOpt = DEFAULT_ROOT,
+    goal: Annotated[
+        list[str] | None,
+        typer.Option("--goal", help="Goal cell ROW,COL; repeat for several (default: every cell)."),
+    ] = None,
+) -> None:
+    """Save FB representations for the dashboard: B, and F/policy/exact density per goal."""
+    from aeris.workflows.four_rooms import export_fb_representations
+
+    goals = [_parse_goal(text) for text in goal] if goal else None
+    with cli_errors():
+        store = resolve_run(run, root=root)
+        result = export_fb_representations(store, goals=goals)
+    states, d = result.backward.shape
+    typer.echo(f"Representations: {result.run_id} / {result.checkpoint}")
+    typer.echo(f"  {states} states, d = {d}, {len(result.goals)} goals")
+    typer.echo(f"Artifact: {store.arrays_path(result.ARTIFACT_NAME)}")
+    typer.echo("View: aeris dashboard (layout 'Representations')")

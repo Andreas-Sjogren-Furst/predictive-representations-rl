@@ -104,6 +104,7 @@ runs/<name>/
   policy_<label>.npz        PolicySnapshot (labels: initial, final)
   checkpoint.pt             trusted torch checkpoint (agent and sampler state)
   analysis/*.json           AnalysisReport subclasses, e.g. tabular_policy_v1.json
+  analysis/*.npz            array artifacts with metadata, e.g. fb_representations_v1.npz
   figures/*.png             rendered plots
 ```
 

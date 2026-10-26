@@ -6,8 +6,10 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
+from aeris.agents.fb.representations import FBRepresentations
 from aeris.data import RunDirectory
 from aeris.domain import (
     ComponentSpec,
@@ -66,3 +68,25 @@ def four_rooms_run(tmp_path) -> Callable[..., RunDirectory]:
         return write_four_rooms_run(tmp_path / subdir, **overrides)
 
     return make
+
+
+def synthetic_representations(
+    states=((1, 1), (1, 2), (2, 1)), goals=((1, 2),), d=4, a=2, seed=0
+) -> FBRepresentations:
+    """Well-formed random FB representations (no torch needed)."""
+    rng = np.random.default_rng(seed)
+    s, g = len(states), len(goals)
+    policy = rng.random((g, s, a))
+    return FBRepresentations(
+        run_id="run",
+        checkpoint="checkpoint.pt",
+        gamma=0.99,
+        states=states,
+        goals=goals,
+        backward=rng.normal(size=(s, d)).astype(np.float32),
+        goal_conditions=rng.normal(size=(g, d)).astype(np.float32),
+        forward=rng.normal(size=(g, s, d, a)).astype(np.float32),
+        target_policy=(policy / policy.sum(-1, keepdims=True)).astype(np.float32),
+        state_density=np.full(s, 1 / s, dtype=np.float32),
+        exact_density=rng.random((g, s, a, s)).astype(np.float32),
+    )

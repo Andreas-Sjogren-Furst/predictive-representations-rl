@@ -38,6 +38,7 @@ uv run aeris runs plot fb_four_rooms                    # figures/*.png from rec
 uv run aeris analysis four-rooms fb_four_rooms          # saved policies vs the exact optimal policy
 uv run aeris analysis fb-checkpoint fb_four_rooms       # FB checkpoint vs exact occupancies
 uv run aeris analysis zero-shot fb_four_rooms           # infer every goal task from reward evidence
+uv run aeris analysis representations fb_four_rooms     # save B, F and exact densities for the dashboard
 uv run aeris dashboard                                  # browse and compare runs interactively
 ```
 

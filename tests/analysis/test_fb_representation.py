@@ -56,3 +56,25 @@ def test_snapshot_agreement_is_reported_not_raised():
     assert diagnose(env, agent, oracle, own).final_snapshot_matches_checkpoint is True
     flipped = PolicySnapshot(states=own.states, actions=[(a + 1) % 4 for a in own.actions])
     assert diagnose(env, agent, oracle, flipped).final_snapshot_matches_checkpoint is False
+
+
+def test_saved_representations_agree_with_the_diagnostic():
+    """F·B vs the exact density in the artifact gives the diagnostic's occupancy correlation."""
+    import numpy as np
+
+    from aeris.analysis.fb_representation import compute_fb_representations
+    from aeris.analysis.tabular_occupancy import centered_pearson
+
+    env, agent, oracle = setup()
+    dynamics = env.tabular_dynamics()
+    n = dynamics.num_states
+    reps = compute_fb_representations(
+        agent, env, dynamics, [(9, 9)], state_density=np.full(n, 1 / n), run_id="r", checkpoint="c"
+    )
+    report = diagnose(env, agent, oracle)
+    non_goal = np.arange(n) != oracle.goal_index
+    correlation = centered_pearson(
+        reps.predicted_density(0)[non_goal], reps.exact_density[0][non_goal]
+    )
+    assert correlation == pytest.approx(report.exact_occupancy_correlation, abs=1e-4)
+    assert reps.backward.shape == (n, agent.config.representation_dim)

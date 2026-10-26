@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from .batch import FBTrainingBatch, FBTransitionSampler
 from .config import DiscreteFBConfig
 from .reports import FBCheckpointReport
+from .representations import FBRepresentations
 
 if TYPE_CHECKING:
     from .agent import DiscreteFBAgent
@@ -17,6 +18,7 @@ __all__ = [
     "DiscreteFBAgent",
     "DiscreteFBConfig",
     "FBCheckpointReport",
+    "FBRepresentations",
     "FBTrainingBatch",
     "FBTransitionSampler",
 ]

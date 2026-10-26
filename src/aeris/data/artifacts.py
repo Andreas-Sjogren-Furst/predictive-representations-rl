@@ -6,14 +6,17 @@ consumers receive typed domain records and never inspect raw arrays.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+import json
+from collections.abc import Iterator, Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from aeris.domain.artifacts import PolicySnapshot
 from aeris.domain.experience import Transition
+from aeris.domain.serialization import to_json_data
 
 
 def file_sha256(path: str | Path) -> str:
@@ -91,3 +94,30 @@ class TransitionFile:
             self.observations, self.actions, self.next_observations, strict=True
         ):
             yield Transition(observation=obs, action=int(action), next_observation=nxt)
+
+
+METADATA_KEY = "__metadata__"
+
+
+def write_arrays_npz(
+    path: str | Path, arrays: Mapping[str, np.ndarray], metadata: Mapping[str, Any]
+) -> Path:
+    """Save named arrays plus JSON metadata in one compressed ``.npz`` (no pickling)."""
+    if METADATA_KEY in arrays:
+        raise ValueError(f"{METADATA_KEY} is reserved for metadata")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # dict[str, Any]: NumPy's stubs would otherwise match the arrays to its allow_pickle keyword.
+    payload: dict[str, Any] = {name: np.asarray(value) for name, value in arrays.items()}
+    payload[METADATA_KEY] = np.array(json.dumps(to_json_data(metadata), allow_nan=False))
+    np.savez_compressed(path, **payload)
+    return path
+
+
+def read_arrays_npz(path: str | Path) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+    with np.load(path, allow_pickle=False) as data:
+        if METADATA_KEY not in data:
+            raise ValueError(f"{path}: not an AERIS array artifact (no metadata)")
+        metadata = json.loads(str(data[METADATA_KEY]))
+        arrays = {name: data[name] for name in data.files if name != METADATA_KEY}
+    return arrays, metadata

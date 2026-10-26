@@ -125,3 +125,19 @@ def test_run_catalog_returns_typed_records(four_rooms_run, tmp_path):
     assert details.last_training_record.step == 5
     assert details.recent_evaluations == ()
     assert details.to_dict()["manifest"]["run_id"] == "run-42"
+
+
+def test_array_artifacts_roundtrip_with_metadata(tmp_path):
+    from aeris.contracts import ArrayStore
+
+    run = RunDirectory(tmp_path)
+    assert isinstance(run, ArrayStore)
+    assert run.read_arrays("absent") is None
+    run.write_arrays(
+        "demo", {"b": np.eye(3, dtype=np.float32)}, {"states": [(1, 2)], "gamma": 0.99}
+    )
+    arrays, metadata = run.read_arrays("demo")
+    assert arrays["b"].dtype == np.float32 and np.array_equal(arrays["b"], np.eye(3))
+    assert metadata == {"states": [[1, 2]], "gamma": 0.99}
+    with pytest.raises(ValueError, match="reserved"):
+        run.write_arrays("bad", {"__metadata__": np.zeros(1)}, {})

@@ -139,3 +139,25 @@ def test_zero_shot_cli_and_figure(tmp_path):
     assert (out / "figures" / "zero_shot_success.png").stat().st_size > 1000
     bad = runner.invoke(app, ["analysis", "zero-shot", str(out), "--goal", "9"])
     assert bad.exit_code != 0 and "ROW,COL" in bad.output
+
+
+@pytest.mark.parametrize("dataset", ["oracle", "random"])
+def test_representations_export_for_any_dataset(tmp_path, dataset):
+    from aeris.agents.fb import FBRepresentations
+    from aeris.workflows.four_rooms import export_fb_representations
+
+    settings = FourRoomsFBTraining(
+        output=tmp_path / "run", dataset=dataset, transitions=300, **TINY
+    )
+    outcome = train_four_rooms_fb(settings)
+    result = runner.invoke(
+        app, ["analysis", "representations", str(outcome.run.root), "--goal", "9,9"]
+    )
+    assert result.exit_code == 0, result.output
+    saved = FBRepresentations.from_arrays(*outcome.run.read_arrays(FBRepresentations.ARTIFACT_NAME))
+    assert saved.goals == ((9, 9),)
+    assert saved.state_density.sum() == pytest.approx(1.0, abs=1e-5)
+    if dataset == "oracle":  # every cell occurs equally often
+        assert saved.state_density.std() == pytest.approx(0.0, abs=1e-7)
+    full = export_fb_representations(outcome.run)
+    assert len(full.goals) == len(full.states) == 68

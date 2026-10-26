@@ -42,6 +42,36 @@ A panel whose data is missing says so and names the command that creates it, for
 | `zero_shot_map` | one run | zero-shot success per goal cell for one evidence protocol |
 | `report` | one run | the numbers of any saved analysis report |
 | `run_overview` | one run | status, provenance and every recorded setting |
+| `projection` | one run | PCA (2-D or 3-D) of each state's representation, coloured by room, distance to goal, row, column or state density |
+| `similarity` | one run | similarity between every pair of states' representations, ordered by room |
+| `b_spectrum` | one run | singular values of B and its effective rank |
+| `occupancy_maps` | one run | learned F(s0, a, z)·B next to the exact occupancy density m/ρ, for a chosen goal, start cell and first action |
+| `value_map` | one run | learned max_a F·z next to the exact optimal value V* |
+
+## Representation panels
+
+The last five panels read `analysis/fb_representations_v1.npz`, created once per run with
+
+```bash
+aeris analysis representations runs/<name>          # all goals; or --goal 9,9 --goal 1,1
+```
+
+It loads the checkpoint (torch) and saves, for every state, B(s), and for every goal z = B(goal):
+F(s, a, z), the target policy and the exact occupancy density. The density is divided by ρ, the
+frequency of each cell in the run's own training data, which is what FB's F·B estimates, so the
+comparison is valid for random as well as oracle datasets. For Four Rooms with all 68 goals it takes
+about 15 seconds and 8 MB. The built-in *Representations* layout shows all five panels.
+
+`projection` and `similarity` can show three representations:
+
+- **F(s, π, z)**, the forward vector averaged over the target policy (default);
+- **F·B**, each state's learned occupancy profile over all states;
+- **B(s)**, the backward vector. The orthonormality regularizer drives E[B Bᵀ] towards I, so B is
+  close to orthogonal across states and its projections and similarities show little structure by
+  design (on the 40k-update Four Rooms runs: mean off-diagonal cosine 0.002, 2–3% variance per
+  principal component). The state structure lives in F and F·B (there, a state's nearest neighbour
+  lies in the same room 94% of the time). Use B to check the regularizer, F and F·B to see what the
+  representation learned.
 
 ## Adding a panel
 

@@ -5,6 +5,8 @@ import json
 import numpy as np
 import pytest
 
+from conftest import synthetic_representations
+
 pytest.importorskip("plotly")
 from aeris.analysis.goal_policy import build_goal_oracle
 from aeris.dashboard.data import load_run, run_stamp
@@ -21,6 +23,13 @@ from aeris.domain import (
     TrajectoryStep,
 )
 from aeris.environments import FourRooms
+
+
+def add_representations(run, seed=0):
+    """A synthetic but well-formed representation artifact over every Four Rooms cell."""
+    states = FourRooms().positions
+    reps = synthetic_representations(states=states, goals=((9, 9), (1, 1)), d=8, a=4, seed=seed)
+    run.write_arrays(reps.ARTIFACT_NAME, *reps.to_arrays())
 
 
 def populate(run):
@@ -138,5 +147,39 @@ def test_layouts_roundtrip_and_override_built_ins(tmp_path):
     assert json.loads(path.read_text())["columns"] == 3
     layouts = load_layouts(tmp_path)
     assert layouts["Run overview"] == layout
-    assert layouts["Compare runs"] == BUILT_IN[1]
+    assert layouts["Compare runs"] == next(b for b in BUILT_IN if b.name == "Compare runs")
     assert all(spec.panel in PANELS for built_in in BUILT_IN for spec in built_in.panels)
+
+
+@pytest.mark.parametrize(
+    "name", ["projection", "similarity", "b_spectrum", "occupancy_maps", "value_map"]
+)
+def test_representation_panels_render_from_the_artifact(name, four_rooms_run):
+    run = four_rooms_run()
+    assert (
+        PANELS[name].missing([populate(run)]) is not None
+    )  # names `aeris analysis representations`
+    add_representations(run)
+    data = populate(run)
+    panel = PANELS[name]
+    assert panel.missing([data]) is None
+    for overrides in (
+        {},
+        {"dimensions": 3, "color": "distance to goal"},
+        {"action": "→", "log": True},
+    ):
+        figure = panel.render([data], panel.resolve_options([data], overrides))
+        assert figure.data
+
+
+def test_every_representation_kind_projects(four_rooms_run):
+    from aeris.dashboard.panels.representations import REPRESENTATIONS
+
+    run = four_rooms_run()
+    add_representations(run)
+    data = populate(run)
+    for kind in REPRESENTATIONS:
+        figure = PANELS["projection"].render(
+            [data], PANELS["projection"].resolve_options([data], {"representation": kind})
+        )
+        assert figure.layout.title.text.startswith(kind.split(":")[0])

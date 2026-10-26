@@ -8,15 +8,18 @@ oracle; nothing here reads files or checks whether a run is eligible.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from aeris.agents.fb.reports import FBCheckpointReport
+from aeris.agents.fb.representations import FBRepresentations
 from aeris.analysis.goal_policy import GoalOracle
 from aeris.analysis.tabular_occupancy import centered_pearson, exact_discounted_occupancy
 from aeris.contracts.environment import TabularModel
-from aeris.domain.artifacts import PolicySnapshot
+from aeris.domain.artifacts import DiscreteState, PolicySnapshot
+from aeris.environments.tabular import TabularDynamics
 
 if TYPE_CHECKING:
     from aeris.agents.fb.agent import DiscreteFBAgent
@@ -114,4 +117,49 @@ def diagnose_fb_representation(
         goal_action_agreement_with_exact_policy_improvement=float(agreement[non_goal].mean()),
         first_hit_goal_performance=first_hit.summary(),
         final_snapshot_matches_checkpoint=snapshot_matches,
+    )
+
+
+def compute_fb_representations(
+    agent: DiscreteFBAgent,
+    model: TabularModel,
+    dynamics: TabularDynamics,
+    goals: Sequence[DiscreteState],
+    *,
+    state_density: np.ndarray,
+    run_id: str,
+    checkpoint: str,
+) -> FBRepresentations:
+    """B for every state and, per goal z_g = B(goal), F, the target policy and the exact density.
+
+    ``state_density`` is rho, the frequency of each state among the training
+    observations FB was compared against. FB's F·B estimates the occupancy
+    density m(s, a, t) / rho(t), so the exact reference is divided by the same
+    rho (NaN where a state never occurs in the data).
+    """
+    states = dynamics.states
+    obs = np.stack([model.observation_for(state) for state in states])
+    rho = np.asarray(state_density, dtype=np.float64)
+    inverse_rho = np.divide(1.0, rho, out=np.full_like(rho, np.nan), where=rho > 0)
+    conditions, forward, policies, exact = [], [], [], []
+    for goal in goals:
+        z = agent.goal_condition(model.observation_for(goal))
+        policy = agent.target_policy(obs, z).cpu().numpy()
+        conditions.append(z.cpu().numpy())
+        forward.append(agent.forward_map(obs, z).cpu().numpy())
+        policies.append(policy)
+        occupancy = exact_discounted_occupancy(dynamics, policy, gamma=agent.config.gamma)
+        exact.append(occupancy * inverse_rho[None, None, :])
+    return FBRepresentations(
+        run_id=run_id,
+        checkpoint=checkpoint,
+        gamma=agent.config.gamma,
+        states=states,
+        goals=tuple(tuple(goal) for goal in goals),
+        backward=agent.backward_features(obs).cpu().numpy().astype(np.float32),
+        goal_conditions=np.stack(conditions).astype(np.float32),
+        forward=np.stack(forward).astype(np.float32),
+        target_policy=np.stack(policies).astype(np.float32),
+        state_density=rho.astype(np.float32),
+        exact_density=np.stack(exact).astype(np.float32),
     )

@@ -36,6 +36,7 @@ The contracts use `typing.Protocol` for structural compatibility. The runtime `i
 | | `TrajectoryRecorder` | Record diagnostic evaluation episodes | Selecting which episodes to keep |
 | | `RunReader` | Return the recorded manifest, metrics, evaluations and trajectories as typed records | Interpreting results or checking analysis eligibility |
 | | `ArtifactStore` | Save/load derived policy snapshots and analysis reports | Computing those artifacts |
+| | `ArrayStore` | Save/load named arrays with JSON metadata (e.g. FB representations) | Typing the arrays: algorithm packages wrap them |
 
 All these capabilities are grouped by component; there is **no universal do-everything agent**. `TrainableAgent` includes `Agent`, while `TaskConditioner` and `Checkpointable` are independent optional capabilities. No algorithm-name branching exists in these definitions.
 

@@ -54,6 +54,17 @@ BUILT_IN = (
         ),
     ),
     Layout(
+        name="Representations",
+        panels=(
+            PanelSpec(panel="projection", options={"color": "room"}),
+            PanelSpec(panel="similarity"),
+            PanelSpec(panel="occupancy_maps", width=2),
+            PanelSpec(panel="value_map", width=2),
+            PanelSpec(panel="projection", options={"dimensions": 3, "color": "distance to goal"}),
+            PanelSpec(panel="b_spectrum"),
+        ),
+    ),
+    Layout(
         name="Compare runs",
         panels=(
             PanelSpec(panel="run_comparison", width=2),
