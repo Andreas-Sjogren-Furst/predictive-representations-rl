@@ -69,7 +69,8 @@ class TransitionFile:
         self.path = Path(path)
         if not self.path.is_file():
             raise FileNotFoundError(f"transition dataset is missing: {self.path}")
-        if expected_sha256 and file_sha256(self.path) != expected_sha256:
+        self.sha256 = file_sha256(self.path)
+        if expected_sha256 and self.sha256 != expected_sha256:
             raise ValueError(f"{self.path}: dataset fingerprint differs from run manifest")
         with np.load(self.path, allow_pickle=False) as saved:
             self.observations = saved["observations"]

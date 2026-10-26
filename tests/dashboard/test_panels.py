@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 
-from conftest import synthetic_representations
+from conftest import synthetic_representations, synthetic_suite_report
 
 pytest.importorskip("plotly")
 from aeris.analysis.goal_policy import build_goal_oracle
@@ -183,3 +183,32 @@ def test_every_representation_kind_projects(four_rooms_run):
             [data], PANELS["projection"].resolve_options([data], {"representation": kind})
         )
         assert figure.layout.title.text.startswith(kind.split(":")[0])
+
+
+@pytest.mark.parametrize(
+    "name", ["suite_scores", "suite_distribution", "task_policy", "goal_scores_map", "suite_tasks"]
+)
+def test_suite_panels_render_from_the_report(name, four_rooms_run):
+    run = four_rooms_run()
+    panel = PANELS[name]
+    assert "aeris analysis zero-shot" in panel.missing([populate(run)])
+    run.write_report(synthetic_suite_report())
+    data = populate(run)
+    assert panel.missing([data]) is None
+    for overrides in (
+        {},
+        {"task": "reach_1_1", "metric": "goal success"},
+        {"family": "room"},
+    ):
+        output = panel.render([data], panel.resolve_options([data], overrides))
+        assert isinstance(output, Table) or output.data
+
+
+def test_task_policy_marks_invisible_tasks(four_rooms_run):
+    run = four_rooms_run()
+    report = synthetic_suite_report()
+    run.write_report(report)
+    data = populate(run)
+    first = report.tasks[0].task.task_id  # synthetic: no rewarded dataset evidence
+    figure = PANELS["task_policy"].render([data], {"task": first, "protocol": "dataset_rewards"})
+    assert "no rewarded evidence" in figure.layout.title.text

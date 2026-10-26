@@ -23,7 +23,7 @@ heavy computation.
 - **Edit layout** (sidebar toggle): add panels, change their width, move them up or down, remove
   them, set the number of columns, and **Save** the layout under a name. Layouts are saved as JSON in
   `dashboards/` (commit them to keep figure setups reproducible). Two layouts are built in:
-  *Run overview* and *Compare runs*; a saved layout with the same name replaces a built-in one.
+  *Run overview*, *Zero-shot suite*, *Representations* and *Compare runs*; a saved layout with the same name replaces a built-in one.
 - **Live refresh** (sidebar toggle): re-reads runs every few seconds, to follow a training run.
 - **Runs tab:** every run under the runs directory with its status, agent and seed.
 
@@ -39,7 +39,11 @@ A panel whose data is missing says so and names the command that creates it, for
 | `evaluation` | many runs | recorded evaluation metrics per checkpoint |
 | `policy_map` | one run | the saved action in each cell, coloured by exact optimality |
 | `trajectory` | one run | an animated replay of a recorded evaluation episode |
-| `zero_shot_map` | one run | zero-shot success per goal cell for one evidence protocol |
+| `suite_scores` | many runs | zero-shot mean normalized score per task family |
+| `suite_distribution` | many runs | every task's zero-shot score, grouped by family |
+| `task_policy` | one run | one task's reward map with the action the agent inferred in every cell |
+| `goal_scores_map` | one run | zero-shot score or goal success per goal cell |
+| `suite_tasks` | one run | a table of every suite task's results |
 | `report` | one run | the numbers of any saved analysis report |
 | `run_overview` | one run | status, provenance and every recorded setting |
 | `projection` | one run | PCA (2-D or 3-D) of each state's representation, coloured by room, distance to goal, row, column or state density |

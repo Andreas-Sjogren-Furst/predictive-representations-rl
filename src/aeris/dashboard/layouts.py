@@ -48,9 +48,21 @@ BUILT_IN = (
             PanelSpec(panel="evaluation"),
             PanelSpec(panel="policy_map"),
             PanelSpec(panel="trajectory"),
-            PanelSpec(panel="zero_shot_map"),
+            PanelSpec(panel="goal_scores_map"),
             PanelSpec(panel="report"),
             PanelSpec(panel="run_overview", width=2),
+        ),
+    ),
+    Layout(
+        name="Zero-shot suite",
+        panels=(
+            PanelSpec(panel="suite_scores", width=2),
+            PanelSpec(panel="suite_distribution", width=2),
+            PanelSpec(panel="task_policy", options={"task": "room_top_left"}),
+            PanelSpec(panel="task_policy", options={"task": "random_dense_0"}),
+            PanelSpec(panel="goal_scores_map"),
+            PanelSpec(panel="task_policy", options={"task": "distance_9_9"}),
+            PanelSpec(panel="suite_tasks", width=2),
         ),
     ),
     Layout(
@@ -70,6 +82,7 @@ BUILT_IN = (
             PanelSpec(panel="run_comparison", width=2),
             PanelSpec(panel="loss_curves", options={"metrics": ["fb_loss"], "smoothing": 5}),
             PanelSpec(panel="evaluation"),
+            PanelSpec(panel="suite_scores", width=2),
         ),
     ),
 )

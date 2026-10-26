@@ -25,9 +25,9 @@ from aeris.dashboard.panels.grid import (
     add_goal,
     add_grid,
     lock_aspect,
-    room_of,
     run_goal,
 )
+from aeris.environments.four_rooms import room_of
 
 POLICY = "policy (target Boltzmann)"
 FORWARD = "F(s, π, z): forward, policy-averaged"

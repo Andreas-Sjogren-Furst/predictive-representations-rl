@@ -12,7 +12,6 @@ from aeris.environments.four_rooms import FourRooms, Position
 
 ARROWS = {0: "↑", 1: "↓", 2: "←", 3: "→"}
 ENV = FourRooms()
-DOORWAYS = {(5, 2): "doorway", (5, 8): "doorway", (2, 5): "doorway", (8, 5): "doorway"}
 
 
 def is_four_rooms(run: RunData) -> bool:
@@ -25,13 +24,6 @@ def run_goal(run: RunData) -> Position | None:
     if evaluation is None or len(evaluation.targets) != 1:
         return None
     return ENV.goal_from_task(evaluation.targets[0].task)
-
-
-def room_of(cell: tuple[int, ...]) -> str:
-    if tuple(cell) in DOORWAYS:
-        return "doorway"
-    row, col = cell
-    return f"{'top' if row < 5 else 'bottom'}-{'left' if col < 5 else 'right'}"
 
 
 def add_grid(

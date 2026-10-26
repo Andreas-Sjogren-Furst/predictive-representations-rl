@@ -95,50 +95,46 @@ def test_diagnostic_refuses_a_checkpoint_from_another_configuration(tmp_path):
         diagnose_fb_checkpoint(outcome.run)
 
 
-def test_zero_shot_privileged_protocol_reproduces_the_training_evaluation(tmp_path):
-    from aeris.domain import ZeroShotReport
-    from aeris.workflows.four_rooms import evaluate_zero_shot_goals
-
-    settings = FourRoomsFBTraining(output=tmp_path / "run", **TINY)
-    outcome = train_four_rooms_fb(settings)
-    # Same goal, episodes and evaluation seeds (seed + 100) as training's final evaluation.
-    report = evaluate_zero_shot_goals(
-        outcome.run, goals=[settings.goal], episodes=settings.episodes, seed=settings.seed + 100
-    )
-    final = {m.name: m.value for m in outcome.final.metrics}
-    privileged = report.tasks[0].outcomes["goal_observation"]
-    assert (privileged.success_rate, privileged.mean_episode_length) == (
-        final["success_rate"],
-        final["mean_episode_length"],
-    )
-    zero_shot = report.tasks[0].outcomes["dataset_rewards"]
-    assert zero_shot.evidence_samples == 272 and zero_shot.rewarded_samples == 4
-    assert outcome.run.read_report(ZeroShotReport) == report
-
-
-def test_zero_shot_evidence_subsample(tmp_path):
-    from aeris.workflows.four_rooms import evaluate_zero_shot_goals
+def test_task_suite_scores_every_task_exactly(tmp_path):
+    from aeris.domain import ZeroShotSuiteReport
+    from aeris.workflows.four_rooms import evaluate_task_suite
 
     outcome = train_four_rooms_fb(FourRoomsFBTraining(output=tmp_path / "run", **TINY))
-    report = evaluate_zero_shot_goals(outcome.run, goals=[(1, 1), (9, 9)], samples=10, episodes=1)
-    assert {t.outcomes["dataset_rewards"].evidence_samples for t in report.tasks} == {10}
+    report = evaluate_task_suite(outcome.run)
+    assert len(report.tasks) == 120
+    assert set(report.mean_score) == {
+        "all",
+        "goal",
+        "room",
+        "distance",
+        "random_sparse",
+        "random_dense",
+    }
+    assert outcome.run.read_report(ZeroShotSuiteReport) == report
+    for result in report.tasks:
+        data, full = result.outcomes["dataset_rewards"], result.outcomes["all_states"]
+        # The oracle dataset holds every state 4 times, so both protocols infer the same z.
+        assert data.actions == full.actions and data.normalized_score == full.normalized_score
+        assert (data.goal_success is not None) == (result.family == "goal")
+        assert data.normalized_score is None or data.normalized_score <= 1 + 1e-9
+
+
+def test_task_suite_evidence_subsample_and_cli(tmp_path):
+    from aeris.workflows.four_rooms import evaluate_task_suite
+
+    outcome = train_four_rooms_fb(FourRoomsFBTraining(output=tmp_path / "run", **TINY))
+    report = evaluate_task_suite(outcome.run, samples=10)
+    assert {r.outcomes["dataset_rewards"].evidence_samples for r in report.tasks} == {10}
+    assert any(r.outcomes["dataset_rewards"].rewarded_samples == 0 for r in report.tasks)
     with pytest.raises(ValueError, match="at most the dataset size"):
-        evaluate_zero_shot_goals(outcome.run, goals=[(1, 1)], samples=10_000, episodes=1)
-
-
-def test_zero_shot_cli_and_figure(tmp_path):
-    pytest.importorskip("matplotlib")
-    out = tmp_path / "run"
-    train_four_rooms_fb(FourRoomsFBTraining(output=out, **TINY))
-    result = runner.invoke(
-        app,
-        ["analysis", "zero-shot", str(out), "--goal", "9,9", "--goal", "1,1", "--episodes", "1"],
-    )
+        evaluate_task_suite(outcome.run, samples=10_000)
+    result = runner.invoke(app, ["analysis", "zero-shot", str(outcome.run.root)])
     assert result.exit_code == 0, result.output
-    assert "dataset_rewards: mean success" in result.output
-    assert (out / "figures" / "zero_shot_success.png").stat().st_size > 1000
-    bad = runner.invoke(app, ["analysis", "zero-shot", str(out), "--goal", "9"])
-    assert bad.exit_code != 0 and "ROW,COL" in bad.output
+    assert "random_dense" in result.output and "dataset_rewards" in result.output
+    unknown = runner.invoke(
+        app, ["analysis", "zero-shot", str(outcome.run.root), "--suite", "nope"]
+    )
+    assert unknown.exit_code == 1 and "unknown task suite" in unknown.output
 
 
 @pytest.mark.parametrize("dataset", ["oracle", "random"])

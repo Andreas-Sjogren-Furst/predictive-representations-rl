@@ -17,11 +17,21 @@ from aeris.domain.artifacts import DiscreteState
 from aeris.domain.environment import ResetResult, StepResult
 from aeris.domain.experience import Transition
 from aeris.domain.spaces import DiscreteActionSpec, ObservationSpec, SpaceSpec
-from aeris.domain.task import TaskSpec
+from aeris.domain.task import TaskSpec, task_family
 from aeris.domain.validation import require_int
 from aeris.environments.tabular import TabularDynamics
 
 Position = tuple[int, int]
+DOORWAYS = frozenset({(5, 2), (5, 8), (2, 5), (8, 5)})
+ROOMS = ("top-left", "top-right", "bottom-left", "bottom-right")
+
+
+def room_of(cell: DiscreteState) -> str:
+    """The room a cell lies in, or ``"doorway"`` for the four connecting cells."""
+    row, col = cell
+    if (row, col) in DOORWAYS:
+        return "doorway"
+    return f"{'top' if row < 5 else 'bottom'}-{'left' if col < 5 else 'right'}"
 
 
 class FourRooms:
@@ -164,12 +174,50 @@ class FourRooms:
         )
 
     def goal_from_task(self, task: TaskSpec) -> Position:
+        if task_family(task) not in ("goal", "distance"):
+            raise ValueError(f"task {task.task_id!r} ({task_family(task)}) has no single goal")
         try:
             goal = (int(task.settings["goal_row"]), int(task.settings["goal_col"]))
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"task {task.task_id!r} has no Four Rooms goal_row/goal_col") from exc
         self._check_position(goal)
         return goal
+
+    def state_rewards(self, task: TaskSpec) -> np.ndarray:
+        """Reward r(s) for being in each state, in the order of ``positions``.
+
+        Task types (``settings["type"]``, default ``"goal"``; built by
+        ``environments.four_rooms_tasks``):
+
+        - ``goal``: 1 in the goal cell;
+        - ``room``: 1 in every cell of one room (doorways excluded);
+        - ``distance``: -(shortest-path distance to the goal) / (largest such distance);
+        - ``random_sparse``: 1 in ``cells`` cells drawn with ``seed``;
+        - ``random_dense``: an independent standard normal per cell, drawn with ``seed``.
+        """
+        family = task_family(task)
+        settings = task.settings
+        if family == "goal":
+            goal = self.goal_from_task(task)
+            return np.array([1.0 if pos == goal else 0.0 for pos in self.positions])
+        if family == "room":
+            room = settings.get("room")
+            if room not in ROOMS:
+                raise ValueError(f"task {task.task_id!r}: room must be one of {ROOMS}")
+            return np.array([1.0 if room_of(pos) == room else 0.0 for pos in self.positions])
+        if family == "distance":
+            dynamics = self.tabular_dynamics()
+            lengths = dynamics.shortest_path_lengths(dynamics.index_of(self.goal_from_task(task)))
+            return -lengths.astype(np.float64) / lengths.max()
+        if family in ("random_sparse", "random_dense"):
+            rng = np.random.default_rng(int(settings["seed"]))
+            if family == "random_dense":
+                return rng.standard_normal(len(self.positions))
+            cells = int(settings.get("cells", 3))
+            rewards = np.zeros(len(self.positions))
+            rewards[rng.choice(len(self.positions), size=cells, replace=False)] = 1.0
+            return rewards
+        raise ValueError(f"task {task.task_id!r}: unknown Four Rooms task type {family!r}")
 
     def require_full_coverage(self, transitions: Iterable[Transition]) -> None:
         """Require exactly one correct one-step sample for every state-action pair."""

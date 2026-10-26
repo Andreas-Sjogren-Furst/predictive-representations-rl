@@ -1,4 +1,4 @@
-"""Four Rooms maps: policies, an animated trajectory and zero-shot success."""
+"""Four Rooms maps: saved policies and an animated trajectory."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ from aeris.dashboard.panels.base import (
     Toggle,
 )
 from aeris.dashboard.panels.grid import ARROWS, ENV, add_goal, grid_figure, is_four_rooms, run_goal
-from aeris.domain.reports import ZeroShotReport
 
 OPTIMAL, SUBOPTIMAL = "#16803c", "#d12626"
 
@@ -193,48 +192,3 @@ class TrajectoryAnimation(Panel):
         episode = f"episode {trajectory.episode_index}"
         title = f"{self.title} · {trajectory.checkpoint_id} · {episode} · {outcome}"
         return STYLE.apply(fig, title)
-
-
-@dataclass(frozen=True)
-class ZeroShotMap(Panel):
-    name = "zero_shot_map"
-    title = "Zero-shot success"
-    scope = "run"
-    description = (
-        "Success rate per goal cell for one evidence protocol of the zero-shot evaluation."
-    )
-
-    def _report(self, run: RunData) -> ZeroShotReport | None:
-        report = run.report(ZeroShotReport)
-        return report if isinstance(report, ZeroShotReport) else None
-
-    def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
-        report = self._report(runs[0])
-        protocols = tuple(report.evidence_protocols) if report else ()
-        return (Choice("protocol", "Evidence", protocols, protocols[-1] if protocols else None),)
-
-    def missing(self, runs: Sequence[RunData]) -> str | None:
-        if self._report(runs[0]) is None:
-            return f"No zero-shot report. Run: aeris analysis zero-shot {runs[0].root}"
-        return None
-
-    def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
-        report = self._report(runs[0])
-        assert report is not None
-        protocol = options["protocol"]
-        values = {tuple(t.goal): t.outcomes[protocol].success_rate for t in report.tasks}
-        fig = grid_figure(values, colorbar_title="success")
-        invisible = [t.goal for t in report.tasks if t.outcomes[protocol].rewarded_samples == 0]
-        if invisible:
-            fig.add_trace(
-                go.Scatter(
-                    x=[g[1] for g in invisible],
-                    y=[g[0] for g in invisible],
-                    mode="text",
-                    text=["×"] * len(invisible),
-                    name="no rewarded evidence",
-                    hoverinfo="skip",
-                )
-            )
-        mean = report.mean_success_rate[protocol]
-        return STYLE.apply(fig, f"{self.title} · {protocol} · mean {mean:.1%}")

@@ -83,39 +83,26 @@ def test_fb_report_does_not_import_torch():
     subprocess.run([sys.executable, "-c", code], check=True)
 
 
-def zero_shot_report(**overrides):
-    from aeris.domain import ZeroShotOutcome, ZeroShotReport, ZeroShotTaskResult
+def test_suite_report_roundtrips_with_its_tasks():
+    from aeris.domain import ZeroShotSuiteReport
+    from conftest import synthetic_suite_report
 
-    outcome = ZeroShotOutcome(
-        evidence_samples=4, rewarded_samples=1, success_rate=0.5, mean_episode_length=10.0
-    )
-    values = dict(
-        run_id="run",
-        checkpoint="checkpoint.pt",
-        evidence_source="dataset.npz sha256:abc",
-        evidence_protocols={"a": "first", "b": "second"},
-        episodes=2,
-        max_steps=10,
-        seed=0,
-        tasks=(
-            ZeroShotTaskResult(
-                task_id="reach_9_9", goal=(9, 9), outcomes={"a": outcome, "b": outcome}
-            ),
-        ),
-        mean_success_rate={"a": 0.5, "b": 0.5},
-    )
-    return ZeroShotReport(**{**values, **overrides})
+    report = synthetic_suite_report()
+    restored = ZeroShotSuiteReport.from_dict(json.loads(json.dumps(report.to_dict())))
+    assert restored == report
+    assert restored.tasks[0].task.settings == report.tasks[0].task.settings
+    assert restored.result("room_top_left").family == "room"
 
 
-def test_zero_shot_report_roundtrips():
-    from aeris.domain import ZeroShotReport
+def test_suite_report_validates_protocols_and_actions():
+    from dataclasses import replace
 
-    report = zero_shot_report()
-    assert ZeroShotReport.from_dict(json.loads(json.dumps(report.to_dict()))) == report
+    from conftest import synthetic_suite_report
 
-
-def test_zero_shot_report_needs_every_protocol_everywhere():
-    with pytest.raises(ValueError, match="one entry per evidence protocol"):
-        zero_shot_report(mean_success_rate={"a": 0.5})
-    with pytest.raises(ValueError, match="at least one task"):
-        zero_shot_report(tasks=())
+    report = synthetic_suite_report()
+    first = report.tasks[0]
+    with pytest.raises(ValueError, match="one outcome per evidence protocol"):
+        bad = replace(first, outcomes={"dataset_rewards": first.outcomes["dataset_rewards"]})
+        replace(report, tasks=(bad, *report.tasks[1:]))
+    with pytest.raises(ValueError, match="one entry per state"):
+        replace(report, states=report.states[:-1])

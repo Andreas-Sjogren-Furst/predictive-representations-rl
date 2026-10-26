@@ -70,3 +70,10 @@ def test_task_inference_does_not_require_agent_to_be_trainable():
     condition = policy.infer_condition(TaskSpec("goal_1"), [(7, 1.0), (3, 0.0)])
     assert condition == (7,)
     assert policy.act(ActionRequest(0, condition=condition)).action == 0
+
+
+def test_zero_shot_agent_is_acting_plus_task_inference():
+    from aeris.contracts import ZeroShotAgent
+
+    assert isinstance(NoTrainingTaskAgent(), ZeroShotAgent)
+    assert not isinstance(FixedPolicy(), ZeroShotAgent)

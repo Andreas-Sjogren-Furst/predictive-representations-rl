@@ -1,57 +1,86 @@
-# Zero-shot goal reaching (v1)
+# Zero-shot task suites
 
-Zero-shot RL claims that one pretrained representation can solve a new task **without further
-learning**, given only a little evidence about the task's reward. This evaluation tests that claim
-on a completed Four Rooms FB run, for every goal cell.
+Zero-shot RL claims that one pretrained representation solves *new* tasks without further
+learning, given only a little evidence about each task's reward. AERIS tests this claim on **task
+suites**: named, versioned sets of tasks on which every agent is evaluated identically, so that FB,
+one-step FB and TD-JEPA can be compared on equal terms.
+
+```bash
+aeris analysis zero-shot runs/<name>                   # suite four_rooms_v1, all pretraining data
+aeris analysis zero-shot runs/<name> --samples 20      # only 20 relabelled observations as evidence
+```
+
+The report is saved as `analysis/zero_shot_suite_v1.json` and shown by the dashboard's
+*Zero-shot suite* layout. On Four Rooms the whole suite takes about 20 seconds.
+
+## The four_rooms_v1 suite
+
+A task is a `TaskSpec` whose `settings["type"]` names its reward family; the environment turns it
+into a reward r(s) for every cell (`FourRooms.state_rewards`, built by
+`environments/four_rooms_tasks.py`).
+
+| Family | Tasks | Reward |
+|---|---|---|
+| `goal` | 68, one per cell | 1 in the goal cell |
+| `room` | 4 | 1 in every cell of one room (doorways excluded) |
+| `distance` | 8 (centre and outer corner of each room) | −(shortest-path distance to the goal) / (largest distance): dense |
+| `random_sparse` | 20 (seeds 0–19) | 1 in 3 random cells: several goals at once |
+| `random_dense` | 20 (seeds 0–19) | an independent standard normal per cell |
+
+Goal tasks saved before task types existed (settings with only `goal_row`/`goal_col`) still read as
+goal tasks.
 
 ## Protocol
 
-For each goal task, and for each evidence protocol below, the agent infers its task condition once
-through the `TaskConditioner` contract (`infer_condition`), then the frozen policy is evaluated on
-seeded start states. All protocols use the **same evaluation seeds**, so start states are paired
-and success rates can be compared goal by goal. The agent is never updated, and inference never sees
-evaluation rollouts.
+For every task and every evidence protocol:
 
-| Evidence protocol | Evidence given to inference | Role |
+1. **Infer** a task condition once, through the `TaskConditioner` contract (FB: `z = mean_i r(s_i) B(s_i)`).
+2. **Act**: query the agent's greedy action in every cell through the `Agent` contract, so any
+   zero-shot agent can be evaluated without suite changes.
+3. **Score exactly** with the known dynamics (`analysis/task_scores.py`), no sampling:
+   - objective: the discounted sum of state rewards, current state included, under a continuing
+     policy, `V(s) = r(s) + γ V(next(s))`, with the agent's γ; this is what FB's `F·z` estimates;
+   - V^π of the agent's policy, V* of the optimal policy and V^rand of the uniformly random policy,
+     each averaged uniformly over start cells;
+   - **normalized score = (V^π − V^rand) / (V* − V^rand)**: 0 is no better than random, 1 is optimal,
+     and it stays meaningful for negative rewards;
+   - goal tasks also report **goal success**: the fraction of non-goal start cells from which the
+     policy first reaches the goal within the run's evaluation horizon.
+
+| Evidence protocol | Evidence | Role |
 |---|---|---|
-| `goal_observation` | one sample: the goal observation with reward 1 | **privileged** baseline: it names the goal state. For FB this is exactly `z = B(goal)`, the conditioning used by training's own evaluation |
-| `dataset_rewards` | the run's reward-free pretraining observations, relabelled with the task reward `r(s) = 1` if `s` is the goal, else `0` | the **zero-shot** setting |
+| `dataset_rewards` | the run's reward-free pretraining observations, relabelled with r(s) | the **zero-shot** setting |
+| `all_states` | every cell once with its reward | **privileged**: the whole reward function, independent of what the data covered |
 
-For FB, inference is `z = mean_i r(s_i) B(s_i)` over the evidence (see `DiscreteFBAgent.infer_condition`).
+On an oracle dataset (every cell exactly 4 times) both protocols infer the same z and score
+identically; on other datasets the gap shows how data coverage affects inference. With `--samples N`
+many tasks may have **no rewarded evidence** (`rewarded_samples = 0`): their inferred z is zero, and
+the dashboard marks them.
 
-With `--samples N`, a fixed random subset of N pretraining observations is relabelled for every
-task instead of all of them. Small N leaves many goals with **no rewarded sample**; their inferred
-`z` is zero, which the report records as `rewarded_samples = 0` and the figure marks with ×.
+Evidence never comes from evaluation; the agent is never updated.
 
-## Run
+## First results (Four Rooms, discrete FB, 40k updates, one seed)
 
-```bash
-uv run --extra fb-torch --extra viz aeris analysis zero-shot runs/fb_four_rooms
-uv run --extra fb-torch aeris analysis zero-shot runs/fb_four_rooms --samples 20 --episodes 20 --no-plots
-uv run --extra fb-torch aeris analysis zero-shot runs/fb_four_rooms --goal 9,9 --goal 1,1
-```
+| Family | oracle data | random data |
+|---|---|---|
+| all (120) | 0.850 | 0.853 |
+| goal | 0.882 | 0.886 |
+| room | 0.958 | 0.912 |
+| distance | 0.876 | 0.916 |
+| random_sparse | 0.889 | 0.894 |
+| random_dense | 0.669 | 0.664 |
 
-Evaluating every goal with the default 10 episodes per goal and protocol takes about a minute on CPU.
+Mean normalized score with `dataset_rewards` evidence. Dense random rewards, which do not resemble
+goals, are clearly the hardest family. These are single-seed numbers.
 
-Outputs (the original run is not modified):
+## Code
 
-- `analysis/zero_shot_goals_v1.json`: a typed `ZeroShotReport` with, per goal and protocol, the
-  number of evidence and rewarded samples, success rate and mean episode length, plus the mean
-  success per protocol and the definition of each protocol.
-- `figures/zero_shot_success.png` (unless `--no-plots`): one success map per protocol.
-
-## Checks and interpretation
-
-- The privileged protocol reproduces training's own final evaluation exactly when given the same
-  goal, episodes and seeds (a regression test enforces this), so the two evaluation paths agree.
-- The inferred `z` scales with the fraction of rewarded samples (`z = (k/N) B(goal)` for `k`
-  rewarded samples out of `N`). FB's forward network normalizes its condition input, but not in a
-  scale-invariant way, so `dataset_rewards` can behave differently from `goal_observation` even with
-  full coverage. That difference is part of what this evaluation measures; `z` is not renormalized.
-- Success here is first-hitting the goal within the run's evaluation horizon from random start
-  cells. Compare it with the exact optimum from `aeris analysis four-rooms` before reading a low
-  rate as a representation failure.
-
-Code: the generic inference-then-evaluation step is `experiments/zero_shot.py`
-(`evaluate_zero_shot`, any `ZeroShotAgent`); evidence construction, eligibility and saving are in
-`workflows/four_rooms.py` (`evaluate_zero_shot_goals`); the figure is `visualization/zero_shot.py`.
+| Layer | Piece |
+|---|---|
+| `domain/task.py` | `TaskSuite`, `task_family` |
+| `environments/four_rooms.py`, `four_rooms_tasks.py` | `state_rewards`, task builders, `four_rooms_v1` |
+| `contracts/environment.py` | `TabularModel.state_rewards` |
+| `analysis/task_scores.py` | exact `policy_values`, `optimal_values`, `task_baseline`, `score_policy` |
+| `domain/reports.py` | `ZeroShotSuiteReport`, `SuiteTaskResult`, `SuiteOutcome` (incl. the greedy action per cell) |
+| `workflows/four_rooms.py` | `evaluate_task_suite` |
+| `dashboard/panels/tasks.py` | score by family, score distribution, task policy, goal map, task table |

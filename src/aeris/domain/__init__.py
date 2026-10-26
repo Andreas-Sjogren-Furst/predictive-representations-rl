@@ -13,14 +13,14 @@ from .reports import (
     AnalysisReport,
     PolicySummary,
     SnapshotReport,
+    SuiteOutcome,
+    SuiteTaskResult,
     TabularPolicyReport,
-    ZeroShotOutcome,
-    ZeroShotReport,
-    ZeroShotTaskResult,
+    ZeroShotSuiteReport,
 )
 from .results import EvaluationRecord, MetricValue, RunManifest, TrainingMetricRecord
 from .spaces import DiscreteActionSpec, ObservationSpec, SpaceSpec
-from .task import TaskEvidenceRef, TaskSpec
+from .task import TaskEvidenceRef, TaskSpec, TaskSuite, task_family
 from .trajectory import EvaluationTrajectory, TrajectoryStep
 
 __all__ = [
@@ -46,11 +46,13 @@ __all__ = [
     "TabularPolicyReport",
     "TaskEvidenceRef",
     "TaskSpec",
+    "TaskSuite",
     "TrainingMetricRecord",
     "TrainingPlan",
     "TrajectoryStep",
     "Transition",
-    "ZeroShotOutcome",
-    "ZeroShotReport",
-    "ZeroShotTaskResult",
+    "SuiteOutcome",
+    "SuiteTaskResult",
+    "ZeroShotSuiteReport",
+    "task_family",
 ]

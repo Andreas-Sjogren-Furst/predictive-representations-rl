@@ -88,40 +88,39 @@ def _parse_goal(text: str) -> tuple[int, int]:
 def zero_shot(
     run: RunArg,
     root: RootOpt = DEFAULT_ROOT,
-    goal: Annotated[
-        list[str] | None,
-        typer.Option("--goal", help="Goal cell ROW,COL; repeat for several (default: every cell)."),
-    ] = None,
+    suite: Annotated[str, typer.Option(help="Task suite to evaluate on.")] = "four_rooms_v1",
     samples: Annotated[
         int | None,
         typer.Option(
             help="Random pretraining observations used as reward evidence (default: all)."
         ),
     ] = None,
-    episodes: Annotated[int, typer.Option(help="Evaluation episodes per goal and protocol.")] = 10,
-    seed: Annotated[int, typer.Option(help="Seed for start states and evidence sampling.")] = 0,
-    no_plots: NoPlotsOpt = False,
+    seed: Annotated[int, typer.Option(help="Seed for evidence sampling.")] = 0,
 ) -> None:
-    """Infer each goal task from evidence and evaluate the frozen FB policy (needs 'fb-torch')."""
-    from aeris.workflows.four_rooms import evaluate_zero_shot_goals, render_zero_shot_figures
+    """Infer every task of a suite and score the frozen policy exactly (needs 'fb-torch')."""
+    from aeris.workflows.four_rooms import evaluate_task_suite
 
-    goals = [_parse_goal(text) for text in goal] if goal else None
     with cli_errors():
         store = resolve_run(run, root=root)
-        report = evaluate_zero_shot_goals(
-            store, goals=goals, samples=samples, episodes=episodes, seed=seed
+        report = evaluate_task_suite(store, suite=suite, samples=samples, seed=seed)
+    protocols = list(report.evidence_protocols)
+    typer.echo(f"Zero-shot suite {report.suite}: {report.run_id} / {report.checkpoint}")
+    typer.echo("  normalized score (0 = random policy, 1 = optimal), mean per family:")
+    typer.echo(f"  {'family':<15}{'tasks':>6}" + "".join(f"{p:>18}" for p in protocols))
+    for family, means in report.mean_score.items():
+        count = (
+            len(report.tasks) if family == "all" else sum(t.family == family for t in report.tasks)
         )
-        figures = () if no_plots else render_zero_shot_figures(store, report)
-    typer.echo(
-        f"Zero-shot evaluation: {report.run_id} / {report.checkpoint}, {len(report.tasks)} goals"
-    )
-    for protocol, rate in report.mean_success_rate.items():
-        invisible = sum(1 for t in report.tasks if t.outcomes[protocol].rewarded_samples == 0)
-        goals_word = "goal" if invisible == 1 else "goals"
-        note = f" ({invisible} {goals_word} had no rewarded evidence)" if invisible else ""
-        typer.echo(f"  {protocol}: mean success {rate:.1%}{note}")
+        cells = "".join(f"{_score(means[p]):>18}" for p in protocols)
+        typer.echo(f"  {family:<15}{count:>6}{cells}")
+    invisible = sum(1 for t in report.tasks if t.outcomes["dataset_rewards"].rewarded_samples == 0)
+    if invisible:
+        typer.echo(f"  {invisible} tasks had no rewarded sample in the dataset evidence")
     typer.echo(f"Report: {store.report_path(type(report))}")
-    _echo_paths("Figure", figures)
+
+
+def _score(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.3f}"
 
 
 @app.command("representations")

@@ -9,7 +9,7 @@ from typing import Any
 from aeris.agents.fb.reports import FBCheckpointReport
 from aeris.dashboard.data import RunData
 from aeris.dashboard.panels.base import Choice, Option, Output, Panel, Table
-from aeris.domain.reports import TabularPolicyReport, ZeroShotReport
+from aeris.domain.reports import TabularPolicyReport, ZeroShotSuiteReport
 
 
 def _scalars(data: Mapping[str, Any], prefix: str = "") -> dict[str, Any]:
@@ -86,7 +86,7 @@ class RunComparison(Panel):
         for run in runs:
             tabular = run.report(TabularPolicyReport)
             fb = run.report(FBCheckpointReport)
-            zero_shot = run.report(ZeroShotReport)
+            suite = run.report(ZeroShotSuiteReport)
             final = (
                 tabular.snapshots.get("final") if isinstance(tabular, TabularPolicyReport) else None
             )
@@ -106,8 +106,8 @@ class RunComparison(Panel):
                     if isinstance(fb, FBCheckpointReport)
                     else None,
                     **(
-                        {f"zero-shot {k}": v for k, v in zero_shot.mean_success_rate.items()}
-                        if isinstance(zero_shot, ZeroShotReport)
+                        {f"zero-shot {p}": v for p, v in suite.mean_score["all"].items()}
+                        if isinstance(suite, ZeroShotSuiteReport)
                         else {}
                     ),
                 }

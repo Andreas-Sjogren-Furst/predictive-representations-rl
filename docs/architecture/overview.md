@@ -130,8 +130,8 @@ names its artifact file), a workflow that checks eligibility and saves the repor
 ## Status against the lifecycle specification
 
 Implemented: typed domain and contracts; offline training with fixed, fingerprinted data;
-goal-reaching evaluation with trajectory capture; zero-shot task inference from reward-labelled
-pretraining data through the `TaskConditioner` contract, recorded with its evidence; atomic, typed run records with failure status;
+goal-reaching evaluation with trajectory capture; zero-shot task suites (rewards as task types the
+environment defines, inference through the `TaskConditioner` contract, exact normalized scores); atomic, typed run records with failure status;
 `SpaceSpec` compatibility checks; exact-model analyses with typed reports; the `aeris` CLI; static
 type checking and CI.
 
@@ -140,8 +140,8 @@ Not implemented yet, so the specification's rules hold only partly:
 - **No resolver.** `ExperimentSpec` is recorded, not executed: each experiment has its own training
   workflow rather than one configured execution path (rule R2), and there is no component registry.
 - **Online and hybrid training** and **resuming** from a checkpoint (sampler state is saved, but
-  nothing restores it). Zero-shot inference is evaluated on Four Rooms goal tasks only; other
-  reward families and evidence sources are not covered yet.
+  nothing restores it). Zero-shot suites are post-hoc analyses of a finished run; they are not yet
+  declared in the run's evaluation plan or evaluated during training, and only Four Rooms has one.
 - **Provenance** records library versions, the dataset fingerprint and the AERIS git commit with a
   dirty flag (`aeris train` warns when the checkout has uncommitted changes), but not the diff of
   those changes or the hardware (rule R7).

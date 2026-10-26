@@ -2,7 +2,7 @@
 
 from aeris.dashboard.panels.base import Panel
 from aeris.dashboard.panels.evaluation import EvaluationResults
-from aeris.dashboard.panels.maps import PolicyMap, TrajectoryAnimation, ZeroShotMap
+from aeris.dashboard.panels.maps import PolicyMap, TrajectoryAnimation
 from aeris.dashboard.panels.representations import (
     BSpectrum,
     OccupancyMaps,
@@ -11,6 +11,13 @@ from aeris.dashboard.panels.representations import (
     ValueMap,
 )
 from aeris.dashboard.panels.tables import ReportView, RunComparison, RunOverview
+from aeris.dashboard.panels.tasks import (
+    GoalScoresMap,
+    SuiteDistribution,
+    SuiteScores,
+    SuiteTasks,
+    TaskPolicy,
+)
 from aeris.dashboard.panels.training import LossCurves
 
 PANELS: dict[str, Panel] = {
@@ -21,7 +28,11 @@ PANELS: dict[str, Panel] = {
         EvaluationResults(),
         PolicyMap(),
         TrajectoryAnimation(),
-        ZeroShotMap(),
+        SuiteScores(),
+        SuiteDistribution(),
+        TaskPolicy(),
+        GoalScoresMap(),
+        SuiteTasks(),
         RunOverview(),
         ReportView(),
         RepresentationProjection(),

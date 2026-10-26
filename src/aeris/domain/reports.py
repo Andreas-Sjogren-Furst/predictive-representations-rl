@@ -12,6 +12,7 @@ from types import MappingProxyType
 from typing import ClassVar
 
 from .serialization import JsonRecord
+from .task import TaskSpec
 from .validation import require_identifier, require_int
 
 
@@ -69,61 +70,67 @@ class TabularPolicyReport(AnalysisReport):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ZeroShotOutcome:
-    """Evaluation of one task with a condition inferred from one kind of evidence."""
+class SuiteOutcome:
+    """One task under one evidence protocol: the inferred policy's exact score."""
 
+    normalized_score: float | None  # (V^pi - V^rand) / (V* - V^rand); None if V* = V^rand
+    policy_value: float  # mean over start states
+    goal_success: float | None  # goal tasks only: non-goal starts that first-hit the goal in time
     evidence_samples: int
-    rewarded_samples: int  # samples with nonzero reward; 0 means the task was invisible
-    success_rate: float
-    mean_episode_length: float
+    rewarded_samples: int  # evidence samples with nonzero reward; 0 means the task was invisible
+    actions: tuple[int, ...]  # greedy action in each state, in the report's ``states`` order
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ZeroShotTaskResult:
-    task_id: str
-    goal: tuple[int, ...]
-    outcomes: Mapping[str, ZeroShotOutcome]  # keyed by evidence protocol
+class SuiteTaskResult:
+    task: TaskSpec
+    family: str
+    optimal_value: float  # mean V* over start states
+    random_value: float  # mean V of the uniformly random policy
+    outcomes: Mapping[str, SuiteOutcome]  # keyed by evidence protocol
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "outcomes", MappingProxyType(dict(self.outcomes)))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ZeroShotReport(AnalysisReport):
-    """Goal-reaching success when the task condition is inferred, per evidence protocol.
+class ZeroShotSuiteReport(AnalysisReport):
+    """Exact zero-shot scores of one checkpoint on every task of a task suite."""
 
-    All protocols use the same evaluation seeds, so start states are paired
-    and success rates can be compared task by task.
-    """
-
-    ARTIFACT_NAME: ClassVar[str] = "zero_shot_goals_v1.json"
+    ARTIFACT_NAME: ClassVar[str] = "zero_shot_suite_v1.json"
 
     schema_version: int = 1
-    analysis: str = "zero_shot_goal_reaching_v1"
+    analysis: str = "zero_shot_task_suite_v1"
     run_id: str
     checkpoint: str
+    suite: str
+    suite_description: str
+    objective: str = (
+        "discounted sum of state rewards, current state included, continuing policy; "
+        "values averaged uniformly over start states"
+    )
+    score_definition: str = "(V^pi - V^random) / (V* - V^random): 0 = random policy, 1 = optimal"
+    gamma: float
+    max_steps: int  # horizon of the goal-success check
     evidence_source: str
     evidence_protocols: Mapping[str, str]  # name -> definition
-    episodes: int
-    max_steps: int
-    seed: int
-    tasks: tuple[ZeroShotTaskResult, ...]
-    mean_success_rate: Mapping[str, float]  # per protocol, uniform over tasks
+    states: tuple[tuple[int, ...], ...]
+    tasks: tuple[SuiteTaskResult, ...]
+    mean_score: Mapping[str, Mapping[str, float | None]]  # family/"all" -> protocol -> mean score
 
     def __post_init__(self) -> None:
         require_identifier("run_id", self.run_id)
-        require_int("episodes", self.episodes, minimum=1)
         require_int("max_steps", self.max_steps, minimum=1)
         if not self.tasks:
-            raise ValueError("a zero-shot report needs at least one task")
+            raise ValueError("a suite report needs at least one task")
         protocols = set(self.evidence_protocols)
-        if any(set(task.outcomes) != protocols for task in self.tasks):
-            raise ValueError("every task needs one outcome per evidence protocol")
-        if set(self.mean_success_rate) != protocols:
-            raise ValueError("mean_success_rate needs one entry per evidence protocol")
-        object.__setattr__(
-            self, "evidence_protocols", MappingProxyType(dict(self.evidence_protocols))
-        )
-        object.__setattr__(
-            self, "mean_success_rate", MappingProxyType(dict(self.mean_success_rate))
-        )
+        for result in self.tasks:
+            if set(result.outcomes) != protocols:
+                raise ValueError("every task needs one outcome per evidence protocol")
+            if any(len(o.actions) != len(self.states) for o in result.outcomes.values()):
+                raise ValueError("outcome actions need one entry per state")
+        for name in ("evidence_protocols", "mean_score"):
+            object.__setattr__(self, name, MappingProxyType(dict(getattr(self, name))))
+
+    def result(self, task_id: str) -> SuiteTaskResult:
+        return next(r for r in self.tasks if r.task.task_id == task_id)

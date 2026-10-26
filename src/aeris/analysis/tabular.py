@@ -75,6 +75,32 @@ class PolicyDiagnostics:
         )
 
 
+def first_hit_steps(
+    actions: np.ndarray, dynamics: TabularDynamics, *, goal_index: int, max_steps: int
+) -> np.ndarray:
+    """Steps a deterministic policy needs to first reach ``goal_index`` from each state.
+
+    -1 where it does not arrive within ``max_steps`` (including deterministic
+    cycles, which can never reach the goal); 0 for the goal itself.
+    """
+    nxt, act = dynamics.next_states, np.asarray(actions)
+    lengths = np.full(dynamics.num_states, -1, dtype=np.int64)
+    lengths[goal_index] = 0
+    for start in range(dynamics.num_states):
+        if start == goal_index:
+            continue
+        current, seen = start, {start}
+        for step in range(1, max_steps + 1):
+            current = int(nxt[current, act[current]])
+            if current == goal_index:
+                lengths[start] = step
+                break
+            if current in seen:  # deterministic cycle: no future path to goal
+                break
+            seen.add(current)
+    return lengths
+
+
 def compare_deterministic_policy(
     actions: np.ndarray,
     dynamics: TabularDynamics,
@@ -90,29 +116,15 @@ def compare_deterministic_policy(
     distribution. This is an exact, model-based diagnostic, not sampled return.
     ``actions`` holds one valid action index per state of ``dynamics``.
     """
-    nxt, act, distances = dynamics.next_states, np.asarray(actions), shortest_distances
+    act, distances = np.asarray(actions), shortest_distances
     num_states = dynamics.num_states
     states = np.arange(num_states)
     non_goal = states != goal_index
     choice_q = optimal.action_values[states, act]
     q_gap = np.maximum(0.0, optimal.action_values.max(axis=1) - choice_q)
     optimal_mask = optimal.optimal_actions[states, act]
-    succeeded = np.zeros(num_states, dtype=bool)
-    lengths = np.full(num_states, -1, dtype=np.int64)
-    succeeded[goal_index] = True
-    lengths[goal_index] = 0
-    for start in states[non_goal]:
-        current = int(start)
-        seen = {current}
-        for step in range(1, max_steps + 1):
-            current = int(nxt[current, act[current]])
-            if current == goal_index:
-                succeeded[start] = True
-                lengths[start] = step
-                break
-            if current in seen:  # deterministic cycle: no future path to goal
-                break
-            seen.add(current)
+    lengths = first_hit_steps(act, dynamics, goal_index=goal_index, max_steps=max_steps)
+    succeeded = lengths >= 0
     successful_starts = succeeded & non_goal
     mean_excess = (
         float(np.mean(lengths[successful_starts] - distances[successful_starts]))

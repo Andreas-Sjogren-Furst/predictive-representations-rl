@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -18,13 +18,16 @@ from aeris.analysis.goal_policy import (
 )
 from aeris.data.artifacts import TransitionFile
 from aeris.data.run_directory import RunDirectory
-from aeris.domain.reports import ZeroShotOutcome, ZeroShotReport, ZeroShotTaskResult
+from aeris.domain.reports import SuiteOutcome, SuiteTaskResult, ZeroShotSuiteReport
 from aeris.domain.results import RunManifest
-from aeris.domain.task import TaskEvidenceRef, TaskSpec
+from aeris.domain.task import TaskSpec, task_family
 from aeris.domain.validation import require_int
 from aeris.environments.four_rooms import FourRooms, Position
-from aeris.experiments.zero_shot import evaluate_zero_shot
+from aeris.experiments.snapshots import record_policy_snapshot
 from aeris.workflows._runtime import use_single_cpu_thread
+
+if TYPE_CHECKING:
+    from aeris.agents.fb.agent import DiscreteFBAgent
 
 # Run conventions shared by training (four_rooms_training.py) and the analyses here:
 # each evaluation label names a policy snapshot and the checkpoint id it was evaluated as.
@@ -75,6 +78,25 @@ def open_four_rooms_run(run_ref: RunRef) -> FourRoomsRun:
     )
 
 
+def _training_data(run: FourRoomsRun, purpose: str) -> TransitionFile:
+    """The run's saved training dataset, verified against the manifest's fingerprint."""
+    spec = run.manifest.experiment.dataset
+    if spec is None:
+        raise ValueError(f"{purpose} needs the run's saved training dataset")
+    return TransitionFile(run.store.dataset_path, expected_sha256=spec.settings.get("sha256"))
+
+
+def _load_checkpoint(run: FourRoomsRun) -> DiscreteFBAgent:
+    """The run's trusted FB checkpoint, checked against the environment and the manifest."""
+    from aeris.agents.fb.checkpoint import load_agent
+
+    use_single_cpu_thread()
+    agent = load_agent(run.store.checkpoint_path)
+    agent.config.spec.require_compatible(run.env.spec, consumer="FB checkpoint")
+    _require_recorded_config(run.manifest, asdict(agent.config))
+    return agent
+
+
 def analyze_saved_policies(run_ref: RunRef, *, gamma: float = 0.99) -> TabularPolicyAnalysis:
     """Compare the run's saved policy snapshots with the exact optimal policy, without torch.
 
@@ -107,21 +129,14 @@ def diagnose_fb_checkpoint(run_ref: RunRef) -> FBCheckpointReport:
     Requires the saved full-coverage oracle dataset, verified by fingerprint and
     by content rather than by its label. Saves ``analysis/fb_checkpoint_v1.json``.
     """
-    from aeris.agents.fb.checkpoint import load_agent
-
-    use_single_cpu_thread()
     from aeris.analysis.fb_representation import diagnose_fb_representation
 
     run = open_four_rooms_run(run_ref)
     dataset = run.manifest.experiment.dataset
-    settings = dataset.settings if dataset is not None else {}
-    if settings.get("origin") != "oracle":
+    if dataset is None or dataset.settings.get("origin") != "oracle":
         raise ValueError("occupancy comparison requires the saved uniform-coverage oracle dataset")
-    transitions = TransitionFile(run.store.dataset_path, expected_sha256=settings.get("sha256"))
-    run.env.require_full_coverage(transitions.iter_transitions())
-    agent = load_agent(run.store.checkpoint_path)
-    agent.config.spec.require_compatible(run.env.spec, consumer="FB checkpoint")
-    _require_recorded_config(run.manifest, asdict(agent.config))
+    run.env.require_full_coverage(_training_data(run, "occupancy comparison").iter_transitions())
+    agent = _load_checkpoint(run)
     final_snapshot = run.store.read_policy_snapshot("final")
     if final_snapshot is not None:
         final_snapshot.require_action_space(run.env.spec.action)
@@ -138,50 +153,43 @@ def diagnose_fb_checkpoint(run_ref: RunRef) -> FBCheckpointReport:
     return report
 
 
-ZERO_SHOT_EVIDENCE = {
-    "goal_observation": (
-        "one sample, the goal observation with reward 1; privileged (it names the goal state) "
-        "and, for FB, equal to conditioning on B(goal)"
-    ),
+SUITE_EVIDENCE = {
     "dataset_rewards": (
-        "the run's reward-free pretraining observations relabelled with the task reward "
-        "r(s) = 1 if s is the goal else 0; the zero-shot setting"
+        "the run's reward-free pretraining observations relabelled with the task reward r(s); "
+        "the zero-shot setting"
+    ),
+    "all_states": (
+        "every state once with its reward; privileged: the full reward function, with no "
+        "dependence on what the training data covered"
     ),
 }
 
 
-def evaluate_zero_shot_goals(
+def evaluate_task_suite(
     run_ref: RunRef,
     *,
-    goals: Sequence[Position] | None = None,
+    suite: str = "four_rooms_v1",
     samples: int | None = None,
-    episodes: int = 10,
     seed: int = 0,
-) -> ZeroShotReport:
-    """Infer each goal task from evidence, then evaluate the frozen policy (needs torch).
+) -> ZeroShotSuiteReport:
+    """Infer every task of a suite from evidence and score the frozen policy exactly (needs torch).
 
-    For every goal (default: every traversable cell) and every protocol in
-    ``ZERO_SHOT_EVIDENCE`` the agent infers its condition through the
-    TaskConditioner contract and is evaluated on the same seeded start states.
-    ``samples`` draws a fixed random subset of the pretraining observations as
-    the relabelled evidence (default: all of them). Inference never sees
-    evaluation rollouts, and the agent is never updated. Saves
-    ``analysis/zero_shot_goals_v1.json``.
+    For each task and each protocol in ``SUITE_EVIDENCE``, the agent infers a
+    condition through the TaskConditioner contract and acts greedily through
+    the Agent contract (so any zero-shot agent can be scored). Its policy is
+    then evaluated exactly on the task's reward against the optimal and the
+    random policy. ``samples`` draws a fixed random subset of the pretraining
+    observations as the relabelled evidence (default: all). Saves
+    ``analysis/zero_shot_suite_v1.json``.
     """
-    from aeris.agents.fb.checkpoint import load_agent
+    from aeris.analysis.task_scores import score_policy, task_baseline
+    from aeris.environments.four_rooms_tasks import task_suite
 
-    use_single_cpu_thread()
-
+    tasks = task_suite(suite)
     run = open_four_rooms_run(run_ref)
-    dataset_spec = run.manifest.experiment.dataset
-    if dataset_spec is None:
-        raise ValueError("zero-shot evidence needs the run's saved pretraining dataset")
-    fingerprint = dataset_spec.settings.get("sha256")
-    dataset = TransitionFile(run.store.dataset_path, expected_sha256=fingerprint)
-    agent = load_agent(run.store.checkpoint_path)
-    agent.config.spec.require_compatible(run.env.spec, consumer="FB checkpoint")
-    _require_recorded_config(run.manifest, asdict(agent.config))
-
+    dataset = _training_data(run, "zero-shot evidence")
+    agent = _load_checkpoint(run)
+    dynamics = run.env.tabular_dynamics()
     observations = dataset.observations
     if samples is not None:
         require_int("samples", samples, minimum=1)
@@ -189,60 +197,88 @@ def evaluate_zero_shot_goals(
             raise ValueError(f"samples must be at most the dataset size ({len(observations)})")
         chosen = np.random.default_rng(seed).choice(len(observations), size=samples, replace=False)
         observations = observations[np.sort(chosen)]
-    sample_states = [run.env.position_of(obs) for obs in observations]
-    eval_env = FourRooms(max_episode_steps=run.max_steps)
-    evidence_source = f"{run.store.dataset_path.name} sha256:{fingerprint}"
-    checkpoint = run.store.checkpoint_path.name
+    sample_states = [dynamics.index_of(run.env.position_of(obs)) for obs in observations]
+    state_observations = [run.env.observation_for(state) for state in dynamics.states]
+    gamma = agent.config.gamma
 
-    tasks = []
-    for goal in goals if goals is not None else run.env.positions:
-        task = run.env.goal_task(goal)
-        goal_obs = run.env.observation_for(goal)
-        rewards = [1.0 if state == goal else 0.0 for state in sample_states]
+    results = []
+    for task in tasks.tasks:
+        rewards = run.env.state_rewards(task)
+        family = task_family(task)
+        goal_index = dynamics.index_of(run.env.goal_from_task(task)) if family == "goal" else None
         evidence = {
-            "goal_observation": [(goal_obs, 1.0)],
-            "dataset_rewards": list(zip(observations, rewards, strict=True)),
+            "dataset_rewards": [
+                (obs, float(rewards[i])) for obs, i in zip(observations, sample_states, strict=True)
+            ],
+            "all_states": [
+                (obs, float(r)) for obs, r in zip(state_observations, rewards, strict=True)
+            ],
         }
+        baseline = task_baseline(dynamics, rewards, gamma=gamma)
         outcomes = {}
-        for name, pairs in evidence.items():
-            record = evaluate_zero_shot(
-                agent,
-                eval_env,
-                task=task,
-                evidence=pairs,
-                evidence_ref=TaskEvidenceRef(source_id=evidence_source, split=name),
-                is_goal=_reaches(goal_obs),
-                episodes=episodes,
-                max_steps=run.max_steps,
-                run_id=run.manifest.run_id,
-                checkpoint_id=checkpoint,
-                seed=seed,
+        for protocol, pairs in evidence.items():
+            condition = agent.infer_condition(task, pairs)
+            snapshot = record_policy_snapshot(
+                agent, dynamics.states, run.env.observation_for, condition=condition
             )
-            metrics = {m.name: m.value for m in record.metrics}
-            outcomes[name] = ZeroShotOutcome(
+            actions = np.asarray(snapshot.actions_for(dynamics.states))
+            score = score_policy(
+                dynamics,
+                actions,
+                rewards,
+                baseline,
+                gamma=gamma,
+                goal_index=goal_index,
+                max_steps=run.max_steps,
+            )
+            outcomes[protocol] = SuiteOutcome(
+                normalized_score=score.normalized_score,
+                policy_value=score.policy_value,
+                goal_success=score.goal_success,
                 evidence_samples=len(pairs),
                 rewarded_samples=sum(1 for _, r in pairs if r != 0),
-                success_rate=metrics["success_rate"],
-                mean_episode_length=metrics["mean_episode_length"],
+                actions=tuple(int(a) for a in actions),
             )
-        tasks.append(ZeroShotTaskResult(task_id=task.task_id, goal=goal, outcomes=outcomes))
+        results.append(
+            SuiteTaskResult(
+                task=task,
+                family=family,
+                optimal_value=baseline.optimal_value,
+                random_value=baseline.random_value,
+                outcomes=outcomes,
+            )
+        )
 
-    report = ZeroShotReport(
+    report = ZeroShotSuiteReport(
         run_id=run.manifest.run_id,
-        checkpoint=checkpoint,
-        evidence_source=evidence_source,
-        evidence_protocols=ZERO_SHOT_EVIDENCE,
-        episodes=episodes,
+        checkpoint=run.store.checkpoint_path.name,
+        suite=tasks.name,
+        suite_description=tasks.description,
+        gamma=gamma,
         max_steps=run.max_steps,
-        seed=seed,
-        tasks=tuple(tasks),
-        mean_success_rate={
-            name: float(np.mean([t.outcomes[name].success_rate for t in tasks]))
-            for name in ZERO_SHOT_EVIDENCE
-        },
+        evidence_source=f"{run.store.dataset_path.name} sha256:{dataset.sha256}",
+        evidence_protocols=SUITE_EVIDENCE,
+        states=dynamics.states,
+        tasks=tuple(results),
+        mean_score=_mean_scores(results),
     )
     run.store.write_report(report)
     return report
+
+
+def _mean_scores(results: Sequence[SuiteTaskResult]) -> dict[str, dict[str, float | None]]:
+    """Mean normalized score per family (and over all tasks) and evidence protocol."""
+    groups: dict[str, list[SuiteTaskResult]] = {"all": list(results)}
+    for result in results:
+        groups.setdefault(result.family, []).append(result)
+    means: dict[str, dict[str, float | None]] = {}
+    for family, members in groups.items():
+        means[family] = {}
+        for protocol in SUITE_EVIDENCE:
+            scores = [r.outcomes[protocol].normalized_score for r in members]
+            defined = [score for score in scores if score is not None]
+            means[family][protocol] = float(np.mean(defined)) if defined else None
+    return means
 
 
 def export_fb_representations(
@@ -255,22 +291,11 @@ def export_fb_representations(
     not only the uniform oracle one. Saves ``analysis/fb_representations_v1.npz``,
     which the dashboard's representation panels read.
     """
-    from aeris.agents.fb.checkpoint import load_agent
     from aeris.analysis.fb_representation import compute_fb_representations
 
-    use_single_cpu_thread()
     run = open_four_rooms_run(run_ref)
-    dataset_spec = run.manifest.experiment.dataset
-    if dataset_spec is None:
-        raise ValueError(
-            "representations need the run's saved training dataset for its state density"
-        )
-    dataset = TransitionFile(
-        run.store.dataset_path, expected_sha256=dataset_spec.settings.get("sha256")
-    )
-    agent = load_agent(run.store.checkpoint_path)
-    agent.config.spec.require_compatible(run.env.spec, consumer="FB checkpoint")
-    _require_recorded_config(run.manifest, asdict(agent.config))
+    dataset = _training_data(run, "representations (for the state density)")
+    agent = _load_checkpoint(run)
     dynamics = run.env.tabular_dynamics()
     counts = np.zeros(dynamics.num_states)
     for observation in dataset.observations:
@@ -286,13 +311,6 @@ def export_fb_representations(
     )
     run.store.write_arrays(FBRepresentations.ARTIFACT_NAME, *representations.to_arrays())
     return representations
-
-
-def _reaches(goal_observation: np.ndarray) -> Callable[[Any], bool]:
-    def is_goal(observation: Any) -> bool:
-        return bool(np.array_equal(observation, goal_observation))
-
-    return is_goal
 
 
 def _require_recorded_config(manifest: RunManifest, config: dict[str, Any]) -> None:
@@ -353,11 +371,3 @@ def render_fb_figures(run_ref: RunRef, report: FBCheckpointReport) -> tuple[Path
 
     path = _store(run_ref).figures_dir / "fb_action_alignment.png"
     return (render_fb_action_alignment(report, path),)
-
-
-def render_zero_shot_figures(run_ref: RunRef, report: ZeroShotReport) -> tuple[Path, ...]:
-    """Plot per-goal zero-shot success maps into ``figures/``."""
-    from aeris.visualization.zero_shot import render_zero_shot_success
-
-    path = _store(run_ref).figures_dir / "zero_shot_success.png"
-    return (render_zero_shot_success(report, path),)

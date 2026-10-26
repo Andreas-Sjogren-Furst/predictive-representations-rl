@@ -10,14 +10,14 @@ from aeris.agents.fb.reports import FBCheckpointReport
 from aeris.agents.fb.representations import FBRepresentations
 from aeris.data.run_directory import RunDirectory
 from aeris.domain.artifacts import PolicySnapshot
-from aeris.domain.reports import AnalysisReport, TabularPolicyReport, ZeroShotReport
+from aeris.domain.reports import AnalysisReport, TabularPolicyReport, ZeroShotSuiteReport
 from aeris.domain.results import EvaluationRecord, RunManifest, TrainingMetricRecord
 from aeris.domain.trajectory import EvaluationTrajectory
 
 REPORT_TYPES: tuple[type[AnalysisReport], ...] = (
     TabularPolicyReport,
     FBCheckpointReport,
-    ZeroShotReport,
+    ZeroShotSuiteReport,
 )
 SNAPSHOT_LABELS = ("initial", "final")
 
