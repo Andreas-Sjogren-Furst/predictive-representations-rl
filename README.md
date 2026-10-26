@@ -79,7 +79,8 @@ that a component really satisfies one.
 
 ## Documentation
 
-- [Experiment lifecycle](docs/architecture/experiment_lifecycle.md), [domain models](docs/architecture/domain_models.md), [component contracts](docs/architecture/component_contracts.md)
+- [Architecture overview](docs/architecture/overview.md): layers, dependency rules, where validation lives, extending AERIS
+- [Domain models](docs/architecture/domain_models.md), [component contracts](docs/architecture/component_contracts.md), and the founding [experiment lifecycle](docs/architecture/experiment_lifecycle.md) specification
 - [Discrete FB algorithm](docs/algorithms/discrete_fb.md)
 - [Four Rooms experiment](docs/experiments/fb_four_rooms.md) and [visualization](docs/experiments/visualization.md)
 - [Tabular policy analysis](docs/analysis/tabular_policy.md) and [FB checkpoint analysis](docs/analysis/fb_checkpoint.md)

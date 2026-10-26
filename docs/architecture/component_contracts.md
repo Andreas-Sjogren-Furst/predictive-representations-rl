@@ -1,6 +1,8 @@
-# Component Contracts — Step 3
+# Component contracts
 
-**Status:** Tested first pass, **not frozen**. Depends on [Experiment Lifecycle](experiment_lifecycle.md) and [Domain Models](domain_models.md).
+The `typing.Protocol` interfaces in `src/aeris/contracts/`. They build on the
+[domain models](domain_models.md); the [architecture overview](overview.md) shows how components
+that satisfy them are wired together by the workflows.
 
 ## Purpose and dependency direction
 
@@ -9,12 +11,12 @@ Contracts standardize **behavior at component boundaries**, not algorithm intern
 ```text
 contracts  ──────→  domain
 implementations ─→ contracts + domain
-orchestrator ────→ contracts + domain
+workflows ───────→ implementations + contracts + domain
 
 domain -X→ contracts / torch / gymnasium / FB implementation
 ```
 
-The contracts use `typing.Protocol` for structural compatibility. The runtime `isinstance()` capability checks used in tests are **shallow**: `@runtime_checkable` checks that methods exist; it does not confirm their argument/return types, valid action spaces, or correct RL semantics. Static type-checking and boundary tests remain necessary. Avoid assuming that a mock implementation establishes scientific correctness.
+The contracts use `typing.Protocol` for structural compatibility. The runtime `isinstance()` capability checks used in tests are **shallow**: `@runtime_checkable` checks that methods exist, not their argument/return types, valid action spaces, or correct RL semantics. **mypy (run in CI) is what verifies that a component really satisfies a contract**; it caught, for example, `FourRooms.observation_for` accepting fewer states than `TabularModel` promises. A mock implementation still does not establish scientific correctness.
 
 ## One module per component, optional agent capabilities
 
@@ -51,7 +53,7 @@ All these capabilities are grouped by component; there is **no universal do-ever
 - We added two minimal runtime domain objects: `ResetResult` and `StepResult`. They are not a new simulator architecture. An adapter may translate a Gymnasium `reset()`/`step()` tuple to these types without importing Gymnasium into core.
 - `StepResult` returns the successor observation, an optional reward, and **known** boolean `terminated`/`truncated`. The runner assembles a `Transition` with the original observation and action. Offline transitions may instead use `None` for **unknown** boundaries.
 - Runtime `info` is intentionally opaque and **not automatically persisted**, especially if it contains unrecordable objects or privileged data. An artifact serializer would need an explicit schema.
-- Observation/action-space descriptions and compatibility validation remain open. We **must implement explicit space descriptors and a resolver check before training real FB**. A shared function signature alone is insufficient.
+- Environments and agent configs expose a `SpaceSpec` (flat observations, discrete actions). `SpaceSpec.require_compatible` refuses mismatches, e.g. when a checkpoint is analyzed; there is no resolver yet that checks a whole experiment spec before training.
 
 ### Data
 
@@ -61,7 +63,7 @@ All these capabilities are grouped by component; there is **no universal do-ever
 ### Recording
 
 - `RunRecorder` deals in previously defined self-describing records. One new model, `TrainingMetricRecord`, connects metric values to a named step axis so gradient updates and environment interactions cannot be mistaken for each other.
-- A concrete recorder will need to define its idempotence/overwrite/transaction rules, run status, failure handling, artifact and checkpoint storage, and schema versioning. Do **not** claim full experiment reproducibility or analysis readiness based on these three methods alone.
+- `data.RunDirectory` is the concrete store. It rewrites the manifest atomically, appends record streams (serializing before writing, so a rejected record never leaves a partial line), reads everything back as typed records with file/line/field errors, and stores policy snapshots and versioned reports (`ARTIFACT_NAME`, `schema_version`). Training refuses a non-empty output directory rather than overwriting. Checkpoint files are owned by the agent package (`agents/fb/checkpoint.py`).
 
 ## Minimal contract examples
 
@@ -78,25 +80,12 @@ class RandomPolicy:
 # No inheritance needed: RandomPolicy satisfies Agent structurally.
 ```
 
-Tests verify discrete/simple vector observations, toy reward-free environment steps, time-limit distinctions, different training batch structures, optional inference and checkpoint capabilities, and self-describing records. They deliberately **do not** yet define a configured experiment runner.
+Tests verify discrete/simple vector observations, toy reward-free environment steps, time-limit distinctions, different training batch structures, optional inference and checkpoint capabilities, typed storage round trips, and self-describing records.
 
-## Deferred design choices (intentionally unresolved)
+## Open design questions
 
-1. **Compatibility/SpaceSpec:** *First pass in `domain/spaces.py` (flat observations, discrete actions): `FourRooms.spec` and `DiscreteFBConfig.spec`, checked with `SpaceSpec.require_compatible` when a checkpoint is analyzed.* Determine a backend-independent way to describe observation/action modalities, shapes, and bounds, then check them at resolution time, before costly training. First mock runner should exercise one compatible and one incompatible combination.
-2. **Task inference evidence:** A resolved evidence view (reward-labeled samples, demonstrations, or something else) must be permission-scoped, with explicit provenance; `TaskConditioner` alone cannot prevent evaluation leakage.
-3. **Recorder artifacts:** Add indexed trajectories/representations/videos and full error and checkpoint metadata only with a real storage implementation.
-4. **Training workflow:** How to select and instantiate `BatchProvider` and update cadence lives in a training strategy, not `Agent` or `Environment`.
-5. **Typing/serialization:** Future static checks, device transfers, batch shapes, process boundaries, and distributed execution require additional validation, not an ever-wider base protocol.
-
-## Step 3 acceptance
-
-- [x] Existing Step 2 domain tests still pass.
-- [x] Protocols are importable without Gymnasium, PyTorch, or FB.
-- [x] Fake policy and trainable agent satisfy common interface without inheriting a base class.
-- [x] Different algorithm batch shapes share a generic data source and training boundary.
-- [x] External evidence inference is an optional capability, not mandatory for agents.
-- [x] Environment steps distinguish termination and truncation.
-- [x] Metric recording identifies task/checkpoint for evaluation and axis for training.
-- [ ] One configured runner swaps environments and agents without source edits (Step 4).
-- [ ] Compatibility, leakage and resume behavior are verified end-to-end (Step 4 and subsequent steps).
-- [ ] Any FB result is reproduced or scientifically validated (later steps).
+1. **Richer spaces and a resolver.** `SpaceSpec` covers flat observations and discrete actions. Continuous actions (needed for one-step FB and TD-JEPA on continuous control) and a resolver that checks a whole experiment spec before training are open.
+2. **Task inference evidence.** A resolved evidence view (reward-labeled samples, demonstrations, or something else) must be permission-scoped, with explicit provenance; `TaskConditioner` alone cannot prevent evaluation leakage. No workflow uses task inference yet.
+3. **Large artifacts.** Trajectories are JSON Lines, suited to small observations; image observations, videos and representation dumps need a binary artifact format.
+4. **Training strategies.** Batch construction and update cadence live in per-experiment training workflows; a reusable strategy abstraction should wait until a second training workflow (online, or another algorithm) shows what is common.
+5. **Resume.** Agent and sampler state are checkpointed, but restoring a run mid-training is not implemented.

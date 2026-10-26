@@ -1,9 +1,8 @@
 # Experiment Lifecycle — Architecture Specification
 
 **Project:** Thesis RL research framework  
-**Status:** Proposed foundation (Step 1); not an implementation contract  
-**Scope:** Experiment execution, component responsibilities, data flow, and recorded results  
-**Next step:** Derive domain models and then minimal protocols from this specification
+**Status:** Founding design specification. It records the requirements and rationale the code was built from; for what is implemented today, and which rules are only partly met, see the [architecture overview](overview.md#status-against-the-lifecycle-specification).  
+**Scope:** Experiment execution, component responsibilities, data flow, and recorded results
 
 ## 1. Purpose
 
@@ -251,13 +250,12 @@ Passing these scenarios does not establish scientific correctness of FB; that re
 
 Prematurely fixing these would risk optimizing for the first FB implementation rather than the framework's long-term scientific purpose.
 
-## 12. Next implementation milestone
+## 12. Implementation
 
-**Step 2 — Domain models (minimal first pass).** Using the lifecycle above, define only what is needed for an end-to-end mock run: experiment specification, action request/result, experience record, task/evaluation identification, and a run/evaluation result. Add shape/type and provenance validation where meaningful, but avoid committing to torch/numpy tensor requirements in the core.
-
-**Step 3 — Component protocols.** Place agent-related capabilities in `contracts/agent.py`, with other contracts introduced only when an actual mock execution requires them.
-
-**Step 4 — Mock runner and contract tests.** Prove the acceptance scenarios before integrating the faithful original discrete FB baseline.
+Steps 2–4 of the original plan (domain models, component protocols, a first end-to-end run) are
+implemented; the [overview](overview.md) maps the phases above to code. The largest remaining gap
+is Phase A: there is no resolver, so a run is produced by an experiment-specific workflow rather
+than by executing an `ExperimentSpec`.
 
 ---
 

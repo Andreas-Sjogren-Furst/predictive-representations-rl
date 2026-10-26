@@ -1,8 +1,9 @@
-# Domain Models — Step 2 (First Pass)
+# Domain models
 
-**Status:** Implemented and unit-tested initial **domain only**, not frozen API.  
-**Source of requirements:** [`experiment_lifecycle.md`](experiment_lifecycle.md).  
-**Next step:** Derive minimal Python `Protocol` types (Step 3), then demonstrate interchangeability in a mock runner (Step 4).
+The shared vocabulary of AERIS, in `src/aeris/domain/`. It imports nothing else from AERIS and
+neither NumPy nor torch (enforced by `tests/test_architecture.py`). See the
+[architecture overview](overview.md) for where these records flow and the
+[experiment lifecycle](experiment_lifecycle.md) for the requirements they come from.
 
 ## Purpose
 
@@ -10,7 +11,7 @@ Standardize **the meaning of data exchanged by components**, without binding the
 
 This iteration distinguishes two categories:
 
-1. **Declarative and recorded data** — portable, JSON-compatible specs and records. Nested config mappings are copied/frozen at construction to prevent accidental mutation of the research configuration. Explicit `.to_dict()` methods produce portable snapshots.
+1. **Declarative and recorded data** — portable, JSON-compatible specs and records. Nested config mappings are copied/frozen at construction to prevent accidental mutation of the research configuration. `to_dict()` and `from_dict()` (see below) convert them to and from JSON data.
 2. **Runtime data** — `ActionRequest`, `ActionResult`, `Transition`; their observations/actions/conditions remain opaque because agents and environments may exchange discrete values, float vectors, images, dictionaries, or recurrent memory. These objects are **not** assumed to be JSON serializable.
 
 ## Models
@@ -43,21 +44,21 @@ validation. Consumers therefore receive valid objects and do not re-validate raw
 - `environment` and `dataset` are optional independently, but a training mode may require one or both. An evaluation-only run (`mode="none"`) needs an `initial_checkpoint`.
 - `EvaluationPlan` ties a named evaluation protocol to external tasks and *optional* references to inference evidence. A task does not contain a pretrained FB vector `z`. The same task can be evaluated with different inference evidence references, to support coverage/sensitivity experiments.
 - `seed` is part of the spec. The actual run gets a separate `run_id` and provenance.
-- **Compatibility is not proved by this dataclass.** Observation/action support, task permission checks, dataset availability, and checkpoint validity must be verified by the future resolver.
+- **Compatibility is not proved by this dataclass.** Observation/action support is checked with `SpaceSpec`; dataset fingerprints, checkpoint/config agreement and run eligibility are checked by the workflows. There is no resolver yet that instantiates components from a spec: the spec is recorded, not executed.
 
 ### Runtime model limitations (deliberate)
 
-- `Any` on observations and actions is an exchange point, **not** a claim that all networks support all shapes. We need `SpaceSpec`/capability checks when implementing the resolver.
+- `Any` on observations and actions is an exchange point, **not** a claim that all networks support all shapes. `SpaceSpec` describes flat observation vectors and discrete actions so far; richer modalities will need richer specs.
 - A single `Transition` models a one-step observation. Sequential training inputs, independent contrastive samples, sequence masks and latent samples are algorithm-specific constructs handled later by training strategies.
 - A `None` termination flag means **unknown**. Neither a `False` default nor a time-limit-to-terminal conversion is permissible.
 - Extra trajectory provenance, time-varying discounts, multi-agent environments and observation serialization formats are deferred until an actual use case needs them.
 
 ### Results and scientific interpretation
 
-- `RunManifest` is a container for a complete configuration snapshot and provenance. **The future recorder** must enforce complete git/dependency/dataset identity and appropriate failure tracking. Constructing an empty-provenance manifest here is not certification of reproducibility.
+- `RunManifest` is a container for a complete configuration snapshot and provenance. The training workflow records the full agent configuration, the dataset fingerprint, library versions and a `running`/`completed`/`failed` status; the code revision and hardware are not recorded yet. Constructing an empty-provenance manifest is not certification of reproducibility.
 - `EvaluationRecord` represents the result of one task, evaluated at one checkpoint using a named protocol and seed. The `inference_evidence` field contains a typed source/split reference for permitted evidence provenance; it must not be filled from secret evaluation rollouts.
 - `MetricValue` explicitly records its unit and aggregation (e.g. `fraction` and `mean`). Equal metric names alone are **not** sufficient for cross-environment comparisons; protocol, task semantics, normalization and environment identity also matter.
-- Artifact indexing (trajectories/videos/representations), timeseries training metrics, event streams and checkpoint-resume content are deferred to the recorder interface and its storage format.
+- Training metrics, evaluations, trajectories, policy snapshots and reports are stored by `data.RunDirectory` (layout in the [overview](overview.md#life-of-a-run)). Videos, representation dumps and checkpoint resume are not implemented.
 
 ## Declarative example
 
@@ -74,22 +75,13 @@ spec = ExperimentSpec(
 )
 
 config = spec.to_dict()  # pure JSON-compatible snapshot, no algorithm instantiated
+assert ExperimentSpec.from_dict(config) == spec
 ```
 
 See `_experiment_spec` in [`workflows/four_rooms_training.py`](../../src/aeris/workflows/four_rooms_training.py) for a complete experiment specification.
 
-## Acceptance of Step 2
+## Boundaries
 
-- [x] Domain objects import no torch, numpy, Gymnasium, or FB implementation.
-- [x] Configuration values are validated for JSON compatibility, recursively snapshotted, and immutable after construction.
-- [x] Offline / online / hybrid / evaluation-only source requirements are checked at the declarative level.
-- [x] Reward-free transitions can represent unknown rewards/termination boundaries without fabricating values.
-- [x] Evaluation records include run/checkpoint/task/protocol/evidence identification and metric units.
-- [x] JSON-compatible spec and result snapshots can be emitted.
-- [ ] Actual component compatibility checks (Step 3/4).
-- [ ] Execution of the experiment lifecycle (Step 4).
-- [ ] Faithful FB reproduction and zero-shot leakage verification (subsequent steps).
-
-## Boundary to preserve in Step 3
-
-Contracts can import these domain classes. **Domain classes must not import the contracts.** Agent-specific training inputs and inspection representations remain optional capabilities rather than mandated fields in `Transition` or `ExperimentSpec`.
+Contracts and every other package can import these domain classes; **domain classes never import
+contracts or implementations**. Agent-specific training inputs and inspection representations remain
+optional capabilities rather than mandated fields in `Transition` or `ExperimentSpec`.

@@ -1,6 +1,6 @@
 # AERIS — Exact tabular policy diagnostics (v1)
 
-This step is an **additive** analysis package. It reads the existing Four Rooms `manifest.json` and `policy_initial.npz`/`policy_final.npz`, and does not alter the training process, FB networks, environment adapter, or 61 passing tests.
+This analysis reads a completed Four Rooms run's `manifest.json` and `policy_initial.npz`/`policy_final.npz` and never alters the run. The numerical part is `analysis/goal_policy.py` (`analyze_policy_snapshots` on any `TabularDynamics`); `workflows/four_rooms.py` (`analyze_saved_policies`) checks eligibility, reads the snapshots and saves the typed `TabularPolicyReport`.
 
 ## Scientific definition
 
