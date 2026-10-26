@@ -4,9 +4,11 @@ import pytest
 from aeris.analysis.tabular import first_hit_steps
 from aeris.analysis.task_scores import (
     deterministic_policy,
+    optimal_solution,
     optimal_values,
     policy_values,
     score_policy,
+    start_scores,
     task_baseline,
 )
 from aeris.environments import FourRooms, TabularDynamics
@@ -77,3 +79,23 @@ def test_goal_success_and_first_hit_steps():
         chain, np.array([1, 0, 0]), rewards, baseline, gamma=0.9, goal_index=2, max_steps=5
     )
     assert score.goal_success == 0.5  # of the two non-goal starts, only state 1 arrives
+
+
+def test_start_scores_are_one_for_optimal_actions_and_flag_the_bad_starts():
+    rewards = ENV.state_rewards(four_rooms_v1().tasks[0])  # reach the first cell
+    solution = optimal_solution(DYN, rewards, gamma=0.99)
+    best = np.argmax(solution.optimal_actions, axis=1)
+    assert np.allclose(start_scores(DYN, best, rewards, gamma=0.99), 1.0)
+    assert np.allclose(solution.values, optimal_values(DYN, rewards, gamma=0.99))
+    worse = best.copy()
+    worse[DYN.index_of((9, 9))] = 1  # down: into the wall, forever
+    scores = start_scores(DYN, worse, rewards, gamma=0.99)
+    assert scores[DYN.index_of((9, 9))] < 0.5
+    assert scores[DYN.index_of((1, 2))] == pytest.approx(1.0)
+
+
+def test_constant_rewards_have_no_start_scores():
+    scores = start_scores(
+        DYN, np.zeros(DYN.num_states, dtype=int), np.ones(DYN.num_states), gamma=0.9
+    )
+    assert np.isnan(scores).all()

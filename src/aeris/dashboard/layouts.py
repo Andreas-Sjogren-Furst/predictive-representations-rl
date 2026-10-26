@@ -66,6 +66,17 @@ BUILT_IN = (
         ),
     ),
     Layout(
+        name="Behaviour",
+        panels=(
+            PanelSpec(panel="rollout"),
+            PanelSpec(panel="fate_map"),
+            PanelSpec(panel="rollout", options={"task": "room_bottom_right", "start": "1,1"}),
+            PanelSpec(panel="fate_map", options={"task": "room_bottom_right"}),
+            PanelSpec(panel="fate_map", options={"colour": "start score"}),
+            PanelSpec(panel="fate_map", options={"task": "random_dense_0"}),
+        ),
+    ),
+    Layout(
         name="Representations",
         panels=(
             PanelSpec(panel="projection", options={"color": "room"}),

@@ -22,8 +22,9 @@ heavy computation.
   page can put two runs' policy maps side by side.
 - **Edit layout** (sidebar toggle): add panels, change their width, move them up or down, remove
   them, set the number of columns, and **Save** the layout under a name. Layouts are saved as JSON in
-  `dashboards/` (commit them to keep figure setups reproducible). Two layouts are built in:
-  *Run overview*, *Zero-shot suite*, *Representations* and *Compare runs*; a saved layout with the same name replaces a built-in one.
+  `dashboards/` (commit them to keep figure setups reproducible). Five layouts are built in:
+  *Run overview*, *Zero-shot suite*, *Behaviour*, *Representations* and *Compare runs*; a saved
+  layout with the same name replaces a built-in one.
 - **Group runs by** (multi-run panels): aggregate seeds of one experiment, or compare groups by any
   setting that differs between the selected runs; see [seeds and sweeps](experiments/sweeps.md).
 - **Live refresh** (sidebar toggle): re-reads runs every few seconds, to follow a training run.
@@ -46,6 +47,8 @@ A panel whose data is missing says so and names the command that creates it, for
 | `suite_distribution` | many runs | every task's zero-shot score, grouped by family |
 | `task_policy` | one run | one task's reward map with the action the agent inferred in every cell |
 | `goal_scores_map` | one run | zero-shot score or goal success per goal cell |
+| `rollout` | one run | the exact path of a zero-shot policy for any suite task from any start, animated, next to an optimal path; suboptimal actions marked |
+| `fate_map` | one run | every start cell coloured by where the zero-shot policy takes it (optimal, detour, late, trapped; or which loop), by start score, or by how many paths pass through |
 | `suite_tasks` | one run | a table of every suite task's results |
 | `report` | one run | the numbers of any saved analysis report |
 | `run_overview` | one run | status, provenance and every recorded setting |
@@ -54,6 +57,12 @@ A panel whose data is missing says so and names the command that creates it, for
 | `b_spectrum` | one run | singular values of B and its effective rank |
 | `occupancy_maps` | one run | learned F(s0, a, z)·B next to the exact occupancy density m/ρ, for a chosen goal, start cell and first action |
 | `value_map` | one run | learned max_a F·z next to the exact optimal value V* |
+
+## Behaviour panels
+
+`rollout` and `fate_map` read the actions saved in the zero-shot suite report and roll them out
+exactly on the known dynamics, for any task and any start; no checkpoint is loaded. See
+[exact rollouts and policy fates](analysis/rollouts.md).
 
 ## Representation panels
 

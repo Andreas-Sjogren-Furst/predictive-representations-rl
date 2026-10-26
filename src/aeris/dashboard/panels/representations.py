@@ -24,7 +24,9 @@ from aeris.dashboard.panels.grid import (
     ENV,
     add_goal,
     add_grid,
+    cell_label,
     lock_aspect,
+    parse_cell,
     run_goal,
 )
 from aeris.environments.four_rooms import room_of
@@ -43,19 +45,10 @@ def _reps(run: RunData) -> FBRepresentations:
     return run.representations
 
 
-def _cell(state: tuple[int, ...]) -> str:
-    return f"{state[0]},{state[1]}"
-
-
-def _parse(cell: str) -> tuple[int, int]:
-    row, col = cell.split(",")
-    return int(row), int(col)
-
-
 def _goal_choice(run: RunData) -> Choice:
-    goals = tuple(_cell(g) for g in _reps(run).goals)
+    goals = tuple(cell_label(g) for g in _reps(run).goals)
     goal = run_goal(run)
-    default = _cell(goal) if goal is not None and _cell(goal) in goals else goals[0]
+    default = cell_label(goal) if goal is not None and cell_label(goal) in goals else goals[0]
     return Choice("goal", "Goal (z = B(goal))", goals, default)
 
 
@@ -110,7 +103,7 @@ class RepresentationProjection(RepresentationPanel):
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         reps = _reps(runs[0])
-        goal = reps.goal_index(_parse(options["goal"]))
+        goal = reps.goal_index(parse_cell(options["goal"]))
         features = _features(reps, options["representation"], goal)
         centered = features - features.mean(axis=0)
         _, singular, vectors = np.linalg.svd(centered, full_matrices=False)
@@ -147,7 +140,7 @@ class RepresentationProjection(RepresentationPanel):
         if kind == "state density":
             return reps.state_density
         dynamics = ENV.tabular_dynamics()
-        distance = dynamics.shortest_path_lengths(dynamics.index_of(_parse(options["goal"])))
+        distance = dynamics.shortest_path_lengths(dynamics.index_of(parse_cell(options["goal"])))
         return np.array([distance[dynamics.index_of(s)] for s in reps.states])
 
     @staticmethod
@@ -192,13 +185,13 @@ class RepresentationSimilarity(RepresentationPanel):
             key=lambda i: (ROOM_ORDER.index(room_of(reps.states[i])), reps.states[i]),
         )
         features = _features(
-            reps, options["representation"], reps.goal_index(_parse(options["goal"]))
+            reps, options["representation"], reps.goal_index(parse_cell(options["goal"]))
         )
         rows = features[order]
         if options["measure"] == "cosine":
             rows = rows / np.maximum(np.linalg.norm(rows, axis=1, keepdims=True), 1e-12)
         similarity = rows @ rows.T
-        ticks = [f"{_cell(reps.states[i])} {room_of(reps.states[i])}" for i in order]
+        ticks = [f"{cell_label(reps.states[i])} {room_of(reps.states[i])}" for i in order]
         limit = float(np.abs(similarity).max())
         fig = go.Figure(
             go.Heatmap(
@@ -254,7 +247,7 @@ class OccupancyMaps(RepresentationPanel):
     description = "Learned F(s0, a, z)·B(t) next to the exact occupancy density m/ρ from one start."
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
-        starts = tuple(_cell(s) for s in _reps(runs[0]).states)
+        starts = tuple(cell_label(s) for s in _reps(runs[0]).states)
         return (
             _goal_choice(runs[0]),
             Choice("start", "Start cell s0", starts, starts[0]),
@@ -264,8 +257,8 @@ class OccupancyMaps(RepresentationPanel):
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         reps = _reps(runs[0])
-        goal = reps.goal_index(_parse(options["goal"]))
-        start = reps.state_index(_parse(options["start"]))
+        goal = reps.goal_index(parse_cell(options["goal"]))
+        start = reps.state_index(parse_cell(options["start"]))
         predicted, exact = (
             reps.predicted_density(goal)[start],
             reps.exact_density[goal][start],
@@ -322,7 +315,7 @@ class ValueMap(RepresentationPanel):
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         reps = _reps(runs[0])
-        goal_cell = _parse(options["goal"])
+        goal_cell = parse_cell(options["goal"])
         goal = reps.goal_index(goal_cell)
         learned = reps.q_values(goal).max(axis=1)
         oracle = build_goal_oracle(ENV.tabular_dynamics(), goal_cell, gamma=reps.gamma)

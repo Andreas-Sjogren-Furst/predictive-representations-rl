@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from typing import Any, TypeAlias
 
 import numpy as np
 import plotly.graph_objects as go
@@ -10,8 +11,19 @@ import plotly.graph_objects as go
 from aeris.dashboard.data import RunData
 from aeris.environments.four_rooms import FourRooms, Position
 
+ColourScale: TypeAlias = str | Sequence[Sequence[Any]]  # a Plotly name or [[stop, colour], ...]
 ARROWS = {0: "↑", 1: "↓", 2: "←", 3: "→"}
 ENV = FourRooms()
+
+
+def cell_label(state: tuple[int, ...]) -> str:
+    """A cell as an option value: ``"row,col"``."""
+    return f"{state[0]},{state[1]}"
+
+
+def parse_cell(cell: str) -> tuple[int, int]:
+    row, col = cell.split(",")
+    return int(row), int(col)
 
 
 def is_four_rooms(run: RunData) -> bool:
@@ -34,7 +46,7 @@ def add_grid(
     col: int | None = None,
     zmin: float | None = 0.0,
     zmax: float | None = 1.0,
-    colorscale: str = "Viridis",
+    colorscale: ColourScale = "Viridis",
     colorbar: dict | None = None,
 ) -> None:
     """Draw walls in grey and optional per-cell values into ``fig`` (or one of its subplots)."""
@@ -82,7 +94,7 @@ def grid_figure(
     *,
     zmin: float = 0.0,
     zmax: float = 1.0,
-    colorscale: str = "Viridis",
+    colorscale: ColourScale = "Viridis",
     colorbar_title: str = "",
 ) -> go.Figure:
     """One grid: walls in grey, optional per-cell values as a heatmap, rows growing downwards."""
@@ -113,4 +125,54 @@ def add_goal(
             marker={"symbol": "star", "size": 16, "color": "#e4a72e", "line": {"width": 1}},
         ),
         **place,
+    )
+
+
+def add_playback(fig: go.Figure, frames: list[go.Frame], *, duration: int = 150) -> None:
+    """Animate ``fig`` through ``frames`` (named by step) with play/pause buttons and a slider."""
+    fig.frames = frames
+    fig.update_layout(
+        updatemenus=[
+            {
+                "type": "buttons",
+                "x": 0,
+                "y": -0.08,
+                "xanchor": "left",
+                "direction": "left",
+                "buttons": [
+                    {
+                        "label": "▶ play",
+                        "method": "animate",
+                        "args": [
+                            None,
+                            {"frame": {"duration": duration, "redraw": False}, "fromcurrent": True},
+                        ],
+                    },
+                    {
+                        "label": "❚❚",
+                        "method": "animate",
+                        "args": [[None], {"frame": {"duration": 0}, "mode": "immediate"}],
+                    },
+                ],
+            }
+        ],
+        sliders=[
+            {
+                "steps": [
+                    {
+                        "label": frame.name,
+                        "method": "animate",
+                        "args": [
+                            [frame.name],
+                            {"frame": {"duration": 0, "redraw": False}, "mode": "immediate"},
+                        ],
+                    }
+                    for frame in frames
+                ],
+                "x": 0.18,
+                "len": 0.82,
+                "y": -0.04,
+                "currentvalue": {"prefix": "step "},
+            }
+        ],
     )

@@ -92,4 +92,4 @@ that a component really satisfies one.
 - [Domain models](docs/architecture/domain_models.md), [component contracts](docs/architecture/component_contracts.md), and the founding [experiment lifecycle](docs/architecture/experiment_lifecycle.md) specification
 - [Discrete FB algorithm](docs/algorithms/discrete_fb.md)
 - [Four Rooms experiment](docs/experiments/fb_four_rooms.md) and [visualization](docs/experiments/visualization.md)
-- [Tabular policy analysis](docs/analysis/tabular_policy.md), [FB checkpoint analysis](docs/analysis/fb_checkpoint.md) and [zero-shot goal reaching](docs/analysis/zero_shot.md)
+- [Tabular policy analysis](docs/analysis/tabular_policy.md), [FB checkpoint analysis](docs/analysis/fb_checkpoint.md), [zero-shot goal reaching](docs/analysis/zero_shot.md) and [exact rollouts and policy fates](docs/analysis/rollouts.md)

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from aeris.analysis.tabular import first_hit_steps, value_iteration
+from aeris.analysis.tabular import OptimalValues, first_hit_steps, value_iteration
 from aeris.environments.tabular import TabularDynamics, TabularMDP
 
 
@@ -53,15 +53,23 @@ def policy_values(
     return np.linalg.solve(np.eye(dynamics.num_states) - gamma * transition, rewards)
 
 
-def optimal_values(dynamics: TabularDynamics, rewards: np.ndarray, *, gamma: float) -> np.ndarray:
-    """Exact V* for state rewards, continuing (no terminal states)."""
+def optimal_solution(
+    dynamics: TabularDynamics, rewards: np.ndarray, *, gamma: float
+) -> OptimalValues:
+    """Exact V*, Q* and the optimal actions for state rewards, continuing (no terminal states)."""
+    rewards = np.asarray(rewards, dtype=np.float64)
     mdp = TabularMDP(
         dynamics,
         np.repeat(rewards[:, None], dynamics.num_actions, axis=1),
         np.zeros(dynamics.num_states, dtype=bool),
         gamma,
     )
-    return value_iteration(mdp).values
+    return value_iteration(mdp)
+
+
+def optimal_values(dynamics: TabularDynamics, rewards: np.ndarray, *, gamma: float) -> np.ndarray:
+    """Exact V* for state rewards, continuing (no terminal states)."""
+    return optimal_solution(dynamics, rewards, gamma=gamma).values
 
 
 def deterministic_policy(actions: np.ndarray, num_actions: int) -> np.ndarray:
@@ -105,3 +113,24 @@ def score_policy(
         random_value=baseline.random_value,
         goal_success=success,
     )
+
+
+def start_scores(
+    dynamics: TabularDynamics, actions: np.ndarray, rewards: np.ndarray, *, gamma: float
+) -> np.ndarray:
+    """The normalized score from each start state alone; NaN where V*(s) = V^rand(s).
+
+    ``(V^pi(s) - V^rand(s)) / (V*(s) - V^rand(s))``: 1 is optimal from that start,
+    0 no better than acting uniformly at random. ``score_policy`` normalizes the
+    means over starts instead, so its score is not the mean of these.
+    """
+    rewards = np.asarray(rewards, dtype=np.float64)
+    uniform = np.full((dynamics.num_states, dynamics.num_actions), 1.0 / dynamics.num_actions)
+    policy = deterministic_policy(np.asarray(actions), dynamics.num_actions)
+    value = policy_values(dynamics, policy, rewards, gamma=gamma)
+    best = optimal_values(dynamics, rewards, gamma=gamma)
+    random = policy_values(dynamics, uniform, rewards, gamma=gamma)
+    gap = best - random
+    scores = np.full(dynamics.num_states, np.nan)
+    np.divide(value - random, gap, out=scores, where=gap > 1e-12)
+    return scores

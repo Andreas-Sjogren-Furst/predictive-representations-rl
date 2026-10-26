@@ -189,7 +189,16 @@ def test_every_representation_kind_projects(four_rooms_run):
 
 
 @pytest.mark.parametrize(
-    "name", ["suite_scores", "suite_distribution", "task_policy", "goal_scores_map", "suite_tasks"]
+    "name",
+    [
+        "suite_scores",
+        "suite_distribution",
+        "task_policy",
+        "goal_scores_map",
+        "suite_tasks",
+        "rollout",
+        "fate_map",
+    ],
 )
 def test_suite_panels_render_from_the_report(name, four_rooms_run):
     run = four_rooms_run()
@@ -202,6 +211,8 @@ def test_suite_panels_render_from_the_report(name, four_rooms_run):
         {},
         {"task": "reach_1_1", "metric": "goal success"},
         {"family": "room"},
+        {"task": "room_top_left", "colour": "start score", "compare": True, "start": "9,9"},
+        {"task": "random_dense_0", "colour": "visits"},
     ):
         output = panel.render([data], panel.resolve_options([data], overrides))
         assert isinstance(output, Table) or output.data
@@ -237,3 +248,46 @@ def test_grouped_panels_aggregate_seeds(four_rooms_run):
     assert len(bars.data) == 1 and bars.data[0].error_y.visible
     table = PANELS["group_summary"].render(runs, {"group_by": "name"})
     assert "(n=3)" in table.rows[0]["name=fb_demo (n=3)"]
+
+
+def test_behaviour_panels_roll_out_the_saved_suite_actions(four_rooms_run):
+    from dataclasses import replace
+
+    from aeris.domain import SuiteOutcome
+
+    report = synthetic_suite_report()
+    states = report.states
+    goal = report.result("reach_1_1")
+    oracle = build_goal_oracle(FourRooms().tabular_dynamics(), (1, 1), gamma=0.99)
+    best = tuple(int(a) for a in oracle.optimal_policy())  # dynamics order = report order
+    stuck = tuple(1 if s == (9, 9) else a for s, a in zip(states, best, strict=True))
+    outcomes = {
+        "dataset_rewards": replace(goal.outcomes["dataset_rewards"], actions=best),
+        "all_states": replace(goal.outcomes["all_states"], actions=stuck),
+    }
+    assert all(isinstance(o, SuiteOutcome) for o in outcomes.values())
+    tasks = tuple(replace(t, outcomes=outcomes) if t is goal else t for t in report.tasks)
+    run = four_rooms_run()
+    run.write_report(replace(report, tasks=tasks))
+    data = populate(run)
+    replay = PANELS["rollout"]
+    figure = replay.render(
+        [data], replay.resolve_options([data], {"task": "reach_1_1", "start": "9,9"})
+    )
+    assert "reaches the goal in 16 steps (shortest 16)" in figure.layout.title.text
+    assert "0 suboptimal actions" in figure.layout.title.text and len(figure.frames) == 17
+    figure = replay.render(
+        [data],
+        replay.resolve_options(
+            [data],
+            {"task": "reach_1_1", "start": "9,9", "protocol": "all_states", "compare": True},
+        ),
+    )
+    title = figure.layout.title.text
+    assert "stays at 9,9 from step 0" in title and "1 suboptimal action" in title
+    assert "dataset_rewards: different path" in title
+    fates = PANELS["fate_map"]
+    figure = fates.render(
+        [data], fates.resolve_options([data], {"task": "reach_1_1", "protocol": "all_states"})
+    )
+    assert "optimal 99% · detour 0% · late 0% · trapped 1%" in figure.layout.title.text

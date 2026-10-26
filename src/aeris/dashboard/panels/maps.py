@@ -21,7 +21,15 @@ from aeris.dashboard.panels.base import (
     Panel,
     Toggle,
 )
-from aeris.dashboard.panels.grid import ARROWS, ENV, add_goal, grid_figure, is_four_rooms, run_goal
+from aeris.dashboard.panels.grid import (
+    ARROWS,
+    ENV,
+    add_goal,
+    add_playback,
+    grid_figure,
+    is_four_rooms,
+    run_goal,
+)
 
 OPTIMAL, SUBOPTIMAL = "#16803c", "#d12626"
 
@@ -132,7 +140,7 @@ class TrajectoryAnimation(Panel):
             )
         )
         trail, agent = len(fig.data) - 2, len(fig.data) - 1
-        fig.frames = [
+        frames = [
             go.Frame(
                 data=[
                     go.Scatter(x=cols[: t + 1], y=rows[: t + 1]),
@@ -143,51 +151,7 @@ class TrajectoryAnimation(Panel):
             )
             for t in range(len(path))
         ]
-        fig.update_layout(
-            updatemenus=[
-                {
-                    "type": "buttons",
-                    "x": 0,
-                    "y": -0.08,
-                    "xanchor": "left",
-                    "direction": "left",
-                    "buttons": [
-                        {
-                            "label": "▶ play",
-                            "method": "animate",
-                            "args": [
-                                None,
-                                {"frame": {"duration": 150, "redraw": False}, "fromcurrent": True},
-                            ],
-                        },
-                        {
-                            "label": "❚❚",
-                            "method": "animate",
-                            "args": [[None], {"frame": {"duration": 0}, "mode": "immediate"}],
-                        },
-                    ],
-                }
-            ],
-            sliders=[
-                {
-                    "steps": [
-                        {
-                            "label": str(t),
-                            "method": "animate",
-                            "args": [
-                                [str(t)],
-                                {"frame": {"duration": 0, "redraw": False}, "mode": "immediate"},
-                            ],
-                        }
-                        for t in range(len(path))
-                    ],
-                    "x": 0.18,
-                    "len": 0.82,
-                    "y": -0.04,
-                    "currentvalue": {"prefix": "step "},
-                }
-            ],
-        )
+        add_playback(fig, frames)
         outcome = "reached goal" if trajectory.success else "not reached"
         episode = f"episode {trajectory.episode_index}"
         title = f"{self.title} · {trajectory.checkpoint_id} · {episode} · {outcome}"
