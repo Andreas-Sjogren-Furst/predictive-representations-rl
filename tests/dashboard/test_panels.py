@@ -146,7 +146,12 @@ def test_run_stamp_changes_when_the_run_changes(four_rooms_run):
 
 
 def test_layouts_roundtrip_and_override_built_ins(tmp_path):
-    layout = Layout(name="Run overview", columns=3, panels=(PanelSpec(panel="report", width=2),))
+    layout = Layout(
+        name="Run overview",
+        columns=3,
+        panels=(PanelSpec(panel="report", width=2),),
+        shared={"task": "reach_1_1"},
+    )
     path = save_layout(tmp_path, layout)
     assert path.name == "run_overview.json"
     assert json.loads(path.read_text())["columns"] == 3
@@ -307,6 +312,17 @@ def test_behaviour_panels_roll_out_the_saved_suite_actions(four_rooms_run):
     rings = next(t for t in figure.data if t.name == "loop (where it ends up)")
     assert list(zip(marked.y, marked.x, strict=True)) == [(9, 9)]
     assert list(zip(rings.y, rings.x, strict=True)) == [(9, 9)]
+    figure = replay.render(
+        [data], replay.resolve_options([data], {"task": "reach_1_1", "protocol": "all_states"})
+    )
+    assert "from 9,9 (lowest-scoring start)" in figure.layout.title.text
+    figure = fates.render(
+        [data],
+        fates.resolve_options(
+            [data], {"task": "reach_1_1", "protocol": "all_states", "colour": "evidence difference"}
+        ),
+    )
+    assert "differs from dataset_rewards at 1 of 68 starts" in figure.layout.title.text
 
 
 def test_policy_map_marks_suboptimal_actions_and_trapped_starts(four_rooms_run):
@@ -424,3 +440,29 @@ def test_reward_maps_diverge_around_zero_only_for_signed_rewards():
     distance = reward_colours(np.array([-1.0, -0.5, 0.0]))
     assert (distance["zmin"], distance["zmax"]) == (-1.0, 0.0)
     assert distance["colorscale"] == REWARD_SCALE
+
+
+def test_fate_map_marks_optimal_loops(four_rooms_run):
+    from dataclasses import replace
+
+    from aeris.analysis.task_scores import optimal_solution
+
+    env = FourRooms()
+    dynamics = env.tabular_dynamics()
+    report = synthetic_suite_report()
+    room = report.result("room_top_left")
+    rewards = np.empty(dynamics.num_states)
+    rewards[[dynamics.index_of(p) for p in env.positions]] = env.state_rewards(room.task)
+    best = optimal_solution(dynamics, rewards, gamma=report.gamma).optimal_actions.argmax(axis=1)
+    order = [dynamics.index_of(state) for state in report.states]
+    actions = tuple(int(best[i]) for i in order)
+    outcomes = {p: replace(o, actions=actions) for p, o in room.outcomes.items()}
+    tasks = tuple(replace(t, outcomes=outcomes) if t is room else t for t in report.tasks)
+    run = four_rooms_run()
+    run.write_report(replace(report, tasks=tasks))
+    data = populate(run)
+    panel = PANELS["fate_map"]
+    figure = panel.render([data], panel.resolve_options([data], {"task": "room_top_left"}))
+    assert "100% of starts reach an optimal loop" in figure.layout.title.text
+    ticks = next(t for t in figure.data if t.type == "heatmap" and t.colorbar.ticktext)
+    assert all("✓ optimal" in tick for tick in ticks.colorbar.ticktext if tick.startswith("loop"))

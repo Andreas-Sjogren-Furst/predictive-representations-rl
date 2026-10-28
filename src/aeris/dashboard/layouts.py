@@ -29,6 +29,9 @@ class Layout(JsonRecord):
     name: str
     columns: int = 2
     panels: tuple[PanelSpec, ...] = ()
+    # Options chosen once for the whole layout (e.g. "task"), by key; the value is the current
+    # choice, or None for the first panel's default. Every panel with that option follows it.
+    shared: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         require_identifier("name", self.name)
@@ -72,13 +75,14 @@ BUILT_IN = (
     ),
     Layout(
         name="Behaviour",
+        shared={"task": None, "protocol": None},  # one task, every angle
         panels=(
             PanelSpec(panel="rollout"),
             PanelSpec(panel="fate_map"),
-            PanelSpec(panel="rollout", options={"task": "room_bottom_right", "start": "1,1"}),
-            PanelSpec(panel="fate_map", options={"task": "room_bottom_right"}),
+            PanelSpec(panel="task_policy"),
             PanelSpec(panel="fate_map", options={"colour": "start score"}),
-            PanelSpec(panel="fate_map", options={"task": "random_dense_0"}),
+            PanelSpec(panel="fate_map", options={"colour": "visits"}),
+            PanelSpec(panel="fate_map", options={"colour": "evidence difference"}),
         ),
     ),
     Layout(

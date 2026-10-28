@@ -1,5 +1,7 @@
 """Run the Streamlit shell headlessly against real run directories."""
 
+import json
+
 import pytest
 
 pytest.importorskip("streamlit")
@@ -32,6 +34,16 @@ def test_app_renders_built_in_layouts_and_saves_edits(tmp_path, four_rooms_run, 
     charts = at.get("plotly_chart")
     assert len(charts) == 6, "every representation panel draws"
     assert all(chart.key.startswith("Representations|") for chart in charts)
+
+    at.sidebar.selectbox[0].set_value("Behaviour").run()
+    assert not at.exception
+    task = next(box for box in at.selectbox if box.label == "Task")  # one picker for the page
+    task.set_value("room_top_left").run()
+    assert not at.exception
+    titles = [
+        json.loads(chart.proto.spec)["layout"]["title"]["text"] for chart in at.get("plotly_chart")
+    ]
+    assert len(titles) == 6 and all("room_top_left" in title for title in titles)
 
     at.sidebar.multiselect[0].set_value(["first", "second"]).run()
     at.sidebar.selectbox[0].set_value("Compare runs").run()

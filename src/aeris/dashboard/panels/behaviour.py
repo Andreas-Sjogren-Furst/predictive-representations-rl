@@ -29,7 +29,7 @@ from aeris.analysis.rollouts import (
 )
 from aeris.analysis.task_scores import optimal_solution, start_scores
 from aeris.dashboard.data import RunData
-from aeris.dashboard.panels.base import STYLE, Choice, Option, Output, Toggle
+from aeris.dashboard.panels.base import STYLE, Choice, Message, Option, Output, Toggle
 from aeris.dashboard.panels.grid import (
     ARROWS,
     COUNT_SCALE,
@@ -60,8 +60,9 @@ STATUS = {
 }
 CYCLE_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a")  # a map compares all pairs: three hues at most
 OTHER_CYCLES = "#a3a29c"
-COLOURINGS = ("outcome", "start score", "visits")
+COLOURINGS = ("outcome", "start score", "visits", "evidence difference")
 LOWEST = "lowest-scoring task"  # a task choice resolved per run and evidence protocol
+LOWEST_START = "lowest-scoring start"  # a start choice resolved per task and protocol
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,16 @@ def _task_choice(runs: Sequence[RunData], prefer: str | None = None) -> Choice:
     return Choice("task", "Task", (LOWEST, *ids) if ids else (), default)
 
 
+def _lowest_start(dynamics: TabularDynamics, b: _Behaviour, scores: np.ndarray) -> int:
+    """The start with the lowest score; among starts within 0.05 of it, the one with the
+    longest path, so that the replay shows how the policy goes wrong, not one wall bump."""
+    if not np.isfinite(scores).any():
+        return 0
+    worst = np.flatnonzero(np.nan_to_num(scores, nan=np.inf) <= np.nanmin(scores) + 0.05)
+    lengths = [rollout(dynamics, b.actions, int(s), goal=b.goal).steps for s in worst]
+    return int(worst[int(np.argmax(lengths))])
+
+
 def _task_title(b: _Behaviour, options: Mapping[str, Any]) -> str:
     task = b.result.task.task_id
     return f"{task} (lowest score)" if options["task"] == LOWEST else task
@@ -167,11 +178,11 @@ class RolloutReplay(SuitePanel):
     )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
-        starts = tuple(cell_label(p) for p in ENV.positions)
+        starts = (LOWEST_START, *(cell_label(p) for p in ENV.positions))
         return (
             _task_choice(runs),
             _protocol_choice(runs),
-            Choice("start", "Start cell", starts, "1,1" if "1,1" in starts else starts[0]),
+            Choice("start", "Start cell", starts, LOWEST_START),
             Toggle("optimal", "Show an optimal path", True),
             Toggle("compare", "Overlay the other evidence protocol", False),
         )
@@ -179,7 +190,11 @@ class RolloutReplay(SuitePanel):
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         b = _behaviour(runs[0], options["task"], options["protocol"])
         dynamics = b.dynamics
-        start = dynamics.index_of(parse_cell(options["start"]))
+        scores = start_scores(dynamics, b.actions, b.rewards, gamma=b.gamma)
+        if options["start"] == LOWEST_START:
+            start = _lowest_start(dynamics, b, scores)
+        else:
+            start = dynamics.index_of(parse_cell(options["start"]))
         path = rollout(dynamics, b.actions, start, goal=b.goal)
         solution = optimal_solution(dynamics, b.rewards, gamma=b.gamma)
         cells = {dynamics.states[s]: float(r) for s, r in enumerate(b.rewards)}
@@ -298,7 +313,7 @@ class RolloutReplay(SuitePanel):
         shortest = (
             int(dynamics.shortest_path_lengths(b.goal)[start]) if b.goal is not None else None
         )
-        score = start_scores(dynamics, b.actions, b.rewards, gamma=b.gamma)[start]
+        score = scores[start]
         parts = [
             _describe(path, dynamics, shortest, b.max_steps),
             f"{len(wrong)} suboptimal action{'s' * (len(wrong) != 1)}",
@@ -308,7 +323,10 @@ class RolloutReplay(SuitePanel):
             same = other.states == path.states
             parts.append(f"{others[0]}: {'same path' if same else 'different path'}")
         fig.update_traces(showscale=False, selector={"type": "heatmap"})  # reward: on hover
-        title = f"{_task_title(b, options)} · {b.protocol} · from {options['start']}"
+        where = cell_label(dynamics.states[start])
+        if options["start"] == LOWEST_START:
+            where += " (lowest-scoring start)"
+        title = f"{_task_title(b, options)} · {b.protocol} · from {where}"
         return STYLE.apply(fig, f"{title}<br><sup>{' · '.join(parts)}</sup>")
 
 
@@ -359,8 +377,9 @@ class FateMap(SuitePanel):
     scope = "run"
     description = (
         "Every start cell coloured by where the zero-shot policy takes it: to the goal "
-        "(optimally, with a detour, too late) or into a loop; or by start score or visits. "
-        "Optionally shows the action in every cell."
+        "(optimally, with a detour, too late) or into a loop (✓ = optimal); or by start "
+        "score, by visits, or by how much the start score changes with the other evidence "
+        "protocol. Optionally shows the action in every cell."
     )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
@@ -412,6 +431,11 @@ class FateMap(SuitePanel):
             summary = (
                 f"busiest cell {cells[busiest]}: entered from {fates.visits[busiest]} other starts"
             )
+        elif colour == "evidence difference":
+            others = [p for p in b.policies if p != b.protocol]
+            if not others:
+                return Message("The suite report has only one evidence protocol.")
+            summary = self._evidence_difference(fig, b, others[0], fate_text)
         elif b.goal is not None:
             summary = add_goal_outcomes(fig, dynamics, fates, max_steps=b.max_steps)
         else:
@@ -426,6 +450,37 @@ class FateMap(SuitePanel):
         title = f"{self.title} · {_task_title(b, options)} · {b.protocol}"
         return finish_map(fig, title, summary)
 
+    @staticmethod
+    def _evidence_difference(
+        fig: go.Figure, b: _Behaviour, other: str, fate_text: Sequence[str]
+    ) -> str:
+        """Colour starts by how much better (blue) or worse (red) this protocol's policy does
+        from them than the other protocol's: only differences in outcome, never ties."""
+        ours = start_scores(b.dynamics, b.actions, b.rewards, gamma=b.gamma)
+        theirs = start_scores(b.dynamics, b.policies[other], b.rewards, gamma=b.gamma)
+        difference = ours - theirs
+        text = [
+            f"{t} · start score {a:.2f} vs {other} {c:.2f}"
+            for t, a, c in zip(fate_text, ours, theirs, strict=True)
+        ]
+        _cell_heatmap(
+            fig,
+            b.dynamics,
+            np.clip(difference, -1, 1),
+            text,
+            zmin=-1,
+            zmax=1,
+            colorscale=SCORE_SCALE,
+            colorbar={"title": f"vs {other}", "thickness": 12},
+        )
+        changed = np.abs(np.nan_to_num(difference)) > 0.01
+        if not changed.any():
+            return f"the same start score from every start as with {other}"
+        return (
+            f"start score differs from {other} at {changed.sum()} of {len(changed)} starts"
+            f" · mean difference {np.nanmean(difference):+.3f}"
+        )
+
     def _cycle_outcomes(
         self, fig: go.Figure, b: _Behaviour, fates: PolicyFates, fate_text: Sequence[str]
     ) -> str:
@@ -435,9 +490,14 @@ class FateMap(SuitePanel):
         code = {cycle: rank for rank, cycle in enumerate(shown)}
         other = len(shown)
         codes = np.array([code.get(int(c), other) for c in fates.cycle_of], dtype=float)
+        best = _optimal_loop_reward(b)
+
+        def mark(cycle: int) -> str:
+            return " ✓ optimal" if _loop_reward(b, fates.cycles[cycle]) >= best - 1e-9 else ""
+
         labels = [
             f"loop {rank + 1}: {_loop(fates.cycles[c], b.dynamics)}, "
-            f"mean reward {_loop_reward(b, fates.cycles[c]):.2f}"
+            f"mean reward {_loop_reward(b, fates.cycles[c]):.2f}{mark(c)}"
             for rank, c in enumerate(shown)
         ]
         colours = list(CYCLE_COLOURS[: len(shown)])
@@ -457,7 +517,7 @@ class FateMap(SuitePanel):
                 "thickness": 12,
                 "tickvals": list(range(len(colours))),
                 "ticktext": [
-                    f"{label.split(':')[0]} · r̄ {_loop_reward(b, fates.cycles[c]):.2f}"
+                    f"{label.split(':')[0]} · r̄ {_loop_reward(b, fates.cycles[c]):.2f}{mark(c)}"
                     for label, c in zip(labels, shown, strict=False)
                 ]
                 + labels[len(shown) :],
@@ -469,9 +529,7 @@ class FateMap(SuitePanel):
 def loop_summary(b: _Behaviour, fates: PolicyFates) -> str:
     """How many loops the policy ends in, and how many starts end in an optimal one: a loop
     collecting as much reward per step as the best loop of an optimal policy."""
-    solution = optimal_solution(b.dynamics, b.rewards, gamma=b.gamma)
-    best = policy_fates(b.dynamics, np.argmax(solution.optimal_actions, axis=1))
-    optimal = max(_loop_reward(b, c) for c in best.cycles)
+    optimal = _optimal_loop_reward(b)
     rewards = np.array([_loop_reward(b, c) for c in fates.cycles])
     reached = rewards[fates.cycle_of[fates.cycle_of >= 0]] >= optimal - 1e-9
     loops = len(fates.cycles)
@@ -482,6 +540,13 @@ def loop_summary(b: _Behaviour, fates: PolicyFates) -> str:
     if rewards.max() < optimal - 1e-9:
         text += f", the agent's best: {rewards.max():.2f}"
     return text
+
+
+def _optimal_loop_reward(b: _Behaviour) -> float:
+    """The mean reward per step of the best loop an optimal policy ends in."""
+    solution = optimal_solution(b.dynamics, b.rewards, gamma=b.gamma)
+    best = policy_fates(b.dynamics, np.argmax(solution.optimal_actions, axis=1))
+    return max(_loop_reward(b, c) for c in best.cycles)
 
 
 def _ranked_cycles(fates: PolicyFates) -> list[int]:

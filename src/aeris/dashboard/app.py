@@ -7,7 +7,7 @@ for the options each panel declares; all plotting lives in ``panels/``.
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -83,15 +83,49 @@ def draw_stats(output: Stats, per_row: int = 4) -> None:
                     st.caption(stat.detail)
 
 
+def panel_runs_for(panel: Any, runs: Sequence[RunData]) -> list[RunData]:
+    return list(runs[:1]) if panel.scope == "run" else list(runs)
+
+
+def shared_pickers(layout: Layout, runs: Sequence[RunData]) -> dict[str, Any]:
+    """One widget per shared option, drawn above the panels from the first panel declaring it."""
+    found: dict[str, Option] = {}
+    for spec in layout.panels:
+        panel = PANELS.get(spec.panel)
+        if panel is None or panel.missing(panel_runs_for(panel, runs)):
+            continue
+        for option in panel.options(panel_runs_for(panel, runs)):
+            if option.key in layout.shared:
+                found.setdefault(option.key, option)
+    values: dict[str, Any] = {}
+    for column, (key, option) in zip(st.columns(max(len(found), 1)), found.items(), strict=False):
+        saved = layout.shared.get(key)
+        valid = saved is not None and (not isinstance(option, Choice) or saved in option.choices)
+        with column:
+            values[key] = option_widget(
+                option, saved if valid else option.default, f"{layout.name}|shared|{key}"
+            )
+    return values
+
+
 def render_panel(
-    index: int, spec: PanelSpec, runs: Sequence[RunData], layout: Layout, editing: bool
+    index: int,
+    spec: PanelSpec,
+    runs: Sequence[RunData],
+    layout: Layout,
+    editing: bool,
+    shared: Mapping[str, Any],
 ) -> PanelSpec:
-    """Draw one panel instance and return its spec with any option changes applied."""
+    """Draw one panel instance and return its spec with any option changes applied.
+
+    ``shared`` holds the layout's shared option values: they override the panel's own, and
+    their widgets are drawn once above the panels instead of in each panel.
+    """
     panel = PANELS.get(spec.panel)
     if panel is None:
         st.warning(f"Unknown panel '{spec.panel}' in this layout.")
         return spec
-    options = dict(spec.options)
+    options = {**spec.options, **shared}
     # Streamlit keeps widget state by key: scope keys to the layout and panel type so a
     # different layout (or panel) at the same position does not inherit stale values.
     key = f"{layout.name}|{index}|{spec.panel}"
@@ -112,9 +146,10 @@ def render_panel(
                 panel_runs = [runs[labels.index(chosen)]]
             resolved = panel.resolve_options(panel_runs, options)
             for option in panel.options(panel_runs):
-                options[option.key] = option_widget(
-                    option, resolved[option.key], f"{key}|{option.key}"
-                )
+                if option.key not in shared:
+                    options[option.key] = option_widget(
+                        option, resolved[option.key], f"{key}|{option.key}"
+                    )
             if editing:
                 width = st.slider(
                     "Width (columns)",
@@ -140,7 +175,10 @@ def render_panel(
             else:
                 st.plotly_chart(output, width="stretch", key=f"{key}|chart")
     return replace(
-        spec, options={k: list(v) if isinstance(v, tuple) else v for k, v in options.items()}
+        spec,
+        options={
+            k: list(v) if isinstance(v, tuple) else v for k, v in options.items() if k not in shared
+        },
     )
 
 
@@ -168,11 +206,12 @@ def render_layout(layout: Layout, runs: Sequence[RunData], editing: bool) -> Non
         row.append((index, spec))
     if row:
         rows.append(row)
+    shared = shared_pickers(layout, runs) if layout.shared else {}
     for row in rows:
         columns = st.columns([min(spec.width, layout.columns) for _, spec in row])
         for column, (index, spec) in zip(columns, row, strict=True):
             with column:
-                specs[index] = render_panel(index, spec, runs, layout, editing)
+                specs[index] = render_panel(index, spec, runs, layout, editing, shared)
                 if editing and (move := edit_controls(index, len(specs))):
                     action = (index, move)
     if action:
@@ -182,7 +221,9 @@ def render_layout(layout: Layout, runs: Sequence[RunData], editing: bool) -> Non
         else:
             other = index - 1 if move == "up" else index + 1
             specs[index], specs[other] = specs[other], specs[index]
-    st.session_state.layout = replace(layout, panels=tuple(specs))
+    st.session_state.layout = replace(
+        layout, panels=tuple(specs), shared={k: shared.get(k, v) for k, v in layout.shared.items()}
+    )
     if action:
         st.rerun()
 

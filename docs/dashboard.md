@@ -25,6 +25,10 @@ heavy computation.
   `dashboards/` (commit them to keep figure setups reproducible). Five layouts are built in:
   *Run overview*, *Zero-shot suite*, *Behaviour*, *Representations* and *Compare runs*; a saved
   layout with the same name replaces a built-in one.
+- **Shared pickers:** a layout can share options between its panels. *Behaviour* shares the task
+  and the evidence protocol: one picker above the grid sets them for every panel, so a whole page
+  follows one task. In a saved layout's JSON, `"shared": {"task": null}` adds such a picker
+  (`null` starts at the first panel's default; a saved value starts there).
 - **Group runs by** (multi-run panels): aggregate seeds of one experiment, or compare groups by any
   setting that differs between the selected runs; see [seeds and sweeps](experiments/sweeps.md).
 - **Live refresh** (sidebar toggle): re-reads runs every few seconds, to follow a training run.
@@ -54,8 +58,8 @@ A panel whose data is missing says so and names the command that creates it, for
 | `suite_distribution` | many runs | every task's zero-shot score, grouped by family; or the difference between the two evidence protocols per task |
 | `task_policy` | one run | one task's reward map with the action the agent inferred in every cell: suboptimal actions white on ink, the loops it ends in circled; the subtitle gives the share of starts that reach an optimal loop (one collecting as much reward per step as an optimal policy's best loop) |
 | `goal_scores_map` | one run | zero-shot score or goal success per goal cell, printed in each cell |
-| `rollout` | one run | the exact path of a zero-shot policy for any suite task from any start, animated, next to an optimal path; suboptimal actions marked |
-| `fate_map` | one run | every start cell coloured by where the zero-shot policy takes it (optimal, detour, late, trapped; or which loop), by start score, or by how many paths pass through; optionally with the action in every cell |
+| `rollout` | one run | the exact path of a zero-shot policy for any suite task from any start (by default the lowest-scoring one), animated, next to an optimal path; suboptimal actions marked |
+| `fate_map` | one run | every start cell coloured by where the zero-shot policy takes it (optimal, detour, late, trapped; or which loop, ✓ marking optimal ones), by start score, by how many paths pass through, or by how much the start score changes with the other evidence protocol; optionally with the action in every cell |
 | `suite_tasks` | one run | a table of every suite task's results, lowest score first, with the gap between evidence protocols |
 | `report` | one run | the numbers of any saved analysis report, rounded |
 | `run_overview` | one run | every recorded setting by section (run, experiment, dataset, agent, training, …); provenance on request; ⚠ marks uncommitted code, errors and unfinished runs |
@@ -71,7 +75,15 @@ A panel whose data is missing says so and names the command that creates it, for
 roll them out exactly on the known dynamics, for any task and any start; no checkpoint is loaded.
 See [exact rollouts and policy fates](analysis/rollouts.md). Their task choice also offers
 **lowest-scoring task**, resolved per run and evidence protocol, so a saved layout can always show
-the current worst case.
+the current worst case. The rollout's start choice likewise offers **lowest-scoring start** (the
+default): among the starts within 0.05 of the lowest start score, the one with the longest path,
+so the replay shows how the policy goes wrong rather than a single bump into a wall.
+
+The *Behaviour* layout is a deep dive into one task, chosen once at the top: the replay from the
+lowest-scoring start, where every start ends up, the reward with the agent's actions, the score
+from each start, where paths converge, and where the two evidence protocols lead to different
+results. That last view compares start scores, not actions: two actions that are equally good
+(common on distance and room tasks) are not a difference.
 
 Reward maps colour by what the reward means: light to darker blue from the lowest to the highest
 reward when rewards have one sign (goal, room, distance, random sparse), and red–grey–blue centred

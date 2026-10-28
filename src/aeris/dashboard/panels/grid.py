@@ -101,10 +101,20 @@ def add_grid(
 
 
 def lock_aspect(fig: go.Figure, subplots: int = 1) -> None:
-    """Square grid cells in every subplot."""
+    """Square grid cells in every subplot; the plot area shrinks to fit rather than the axes
+    stretching past the grid."""
     for index in range(1, subplots + 1):
         suffix = "" if index == 1 else str(index)
-        fig.update_layout({f"yaxis{suffix}": {"scaleanchor": f"x{suffix}", "scaleratio": 1}})
+        fig.update_layout(
+            {
+                f"xaxis{suffix}": {"constrain": "domain"},
+                f"yaxis{suffix}": {
+                    "scaleanchor": f"x{suffix}",
+                    "scaleratio": 1,
+                    "constrain": "domain",
+                },
+            }
+        )
     fig.update_layout(plot_bgcolor="white")
 
 
@@ -196,7 +206,7 @@ def add_playback(fig: go.Figure, frames: list[go.Frame], *, duration: int = 150)
                 "x": 0.18,
                 "len": 0.82,
                 "y": -0.04,
-                "currentvalue": {"prefix": "step "},
+                "currentvalue": {"prefix": "step ", "xanchor": "right"},  # clear of the buttons
             }
         ],
     )
