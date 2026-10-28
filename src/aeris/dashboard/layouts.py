@@ -87,12 +87,13 @@ BUILT_IN = (
     ),
     Layout(
         name="Representations",
+        shared={"goal": None},  # z = B(goal) for every panel
         panels=(
             PanelSpec(panel="projection", options={"color": "room"}),
             PanelSpec(panel="similarity"),
             PanelSpec(panel="occupancy_maps", width=2),
             PanelSpec(panel="value_map", width=2),
-            PanelSpec(panel="projection", options={"dimensions": 3, "color": "distance to goal"}),
+            PanelSpec(panel="action_values"),
             PanelSpec(panel="b_spectrum"),
         ),
     ),

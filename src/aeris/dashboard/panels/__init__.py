@@ -5,6 +5,7 @@ from aeris.dashboard.panels.behaviour import FateMap, RolloutReplay, TaskPolicy
 from aeris.dashboard.panels.evaluation import EvaluationResults
 from aeris.dashboard.panels.maps import PolicyMap, TrajectoryAnimation
 from aeris.dashboard.panels.representations import (
+    ActionValues,
     BSpectrum,
     OccupancyMaps,
     RepresentationProjection,
@@ -45,6 +46,7 @@ PANELS: dict[str, Panel] = {
         BSpectrum(),
         OccupancyMaps(),
         ValueMap(),
+        ActionValues(),
     )
 }
 

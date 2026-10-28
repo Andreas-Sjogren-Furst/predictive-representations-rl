@@ -64,10 +64,11 @@ A panel whose data is missing says so and names the command that creates it, for
 | `report` | one run | the numbers of any saved analysis report, rounded |
 | `run_overview` | one run | every recorded setting by section (run, experiment, dataset, agent, training, …); provenance on request; ⚠ marks uncommitted code, errors and unfinished runs |
 | `projection` | one run | PCA (2-D or 3-D) of each state's representation, coloured by room, distance to goal, row, column or state density |
-| `similarity` | one run | similarity between every pair of states' representations, ordered by room |
-| `b_spectrum` | one run | singular values of B and its effective rank |
-| `occupancy_maps` | one run | learned F(s0, a, z)·B next to the exact occupancy density m/ρ, for a chosen goal, start cell and first action |
-| `value_map` | one run | learned max_a F·z next to the exact optimal value V* |
+| `similarity` | one run | similarity between every pair of states' representations, ordered and labelled by room |
+| `b_spectrum` | one run | singular values of centred B and its effective rank, out of the at most S − 1 directions S states can span |
+| `occupancy_maps` | one run | learned F(s0, a, z)·B, the exact occupancy density m/ρ and their difference, for a chosen goal, start cell and first action; the title gives the learned share of the exact occupancy mass |
+| `value_map` | one run | learned F·z next to the exact value of the same objective (the goal's occupancy over ρ), under FB's own policy or an optimal one, on one colour scale |
+| `action_values` | one run | for z = B(goal): where the best learned action is not optimal, and the learned, same-policy and optimal value of every action in one cell (by default the costliest mistake) |
 
 ## Behaviour panels
 
@@ -96,7 +97,7 @@ state equally. Use the *difference* view of `suite_distribution` to see where th
 
 ## Representation panels
 
-The last five panels read `analysis/fb_representations_v1.npz`, created once per run with
+The last six panels read `analysis/fb_representations_v1.npz`, created once per run with
 
 ```bash
 aeris analysis representations runs/<name>          # all goals; or --goal 9,9 --goal 1,1
@@ -106,7 +107,20 @@ It loads the checkpoint (torch) and saves, for every state, B(s), and for every 
 F(s, a, z), the target policy and the exact occupancy density. The density is divided by ρ, the
 frequency of each cell in the run's own training data, which is what FB's F·B estimates, so the
 comparison is valid for random as well as oracle datasets. For Four Rooms with all 68 goals it takes
-about 15 seconds and 8 MB. The built-in *Representations* layout shows all five panels.
+about 15 seconds and 8 MB. The built-in *Representations* layout shows them for one goal, chosen
+once at the top (a shared picker).
+
+All comparisons are in FB's own units: F(s, a, z)·B(t) estimates m(s, a, t)/ρ(t), and with
+z = B(goal), F·z estimates m(s, a, goal)/ρ(goal), the discounted number of visits to the goal
+(continuing, nothing terminal) divided by its frequency in the data. `value_map` and
+`action_values` compare it with exactly that quantity, never with a terminal goal-reaching value,
+which measures something else.
+
+On the 40k-update runs these views show F·B is **too local**. From (1,1) with z = B(9,9), the
+learned occupancy correlates 0.99 with the exact one but holds only about 36% of its mass, which is
+missing mostly in the rooms reached later. The learned value of the goal under FB's own policy is
+about 10% of the exact one, while still correlating 0.95. Far from the goal the learned values are
+nearly flat, so the action ranking there rests on small differences.
 
 `projection` and `similarity` can show three representations:
 

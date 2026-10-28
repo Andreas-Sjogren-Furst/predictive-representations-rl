@@ -34,6 +34,7 @@ def test_app_renders_built_in_layouts_and_saves_edits(tmp_path, four_rooms_run, 
     charts = at.get("plotly_chart")
     assert len(charts) == 6, "every representation panel draws"
     assert all(chart.key.startswith("Representations|") for chart in charts)
+    assert [box.label for box in at.selectbox].count("Goal (z = B(goal))") == 1  # shared
 
     at.sidebar.selectbox[0].set_value("Behaviour").run()
     assert not at.exception

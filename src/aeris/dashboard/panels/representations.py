@@ -15,13 +15,25 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from aeris.agents.fb.representations import FBRepresentations
-from aeris.analysis.goal_policy import build_goal_oracle
 from aeris.analysis.tabular_occupancy import centered_pearson
+from aeris.analysis.task_scores import optimal_solution
 from aeris.dashboard.data import RunData
-from aeris.dashboard.panels.base import STYLE, Choice, Option, Output, Panel, Toggle
+from aeris.dashboard.panels.base import (
+    STYLE,
+    Choice,
+    Option,
+    Output,
+    Panel,
+    Toggle,
+    series_colour,
+)
+from aeris.dashboard.panels.behaviour import add_actions
 from aeris.dashboard.panels.grid import (
     ARROWS,
+    COUNT_SCALE,
     ENV,
+    INK,
+    SCORE_SCALE,
     add_goal,
     add_grid,
     cell_label,
@@ -38,6 +50,7 @@ BACKWARD = "B(s): backward"
 REPRESENTATIONS = (FORWARD, PROFILE, BACKWARD)
 ROOM_ORDER = ("top-left", "top-right", "bottom-left", "bottom-right", "doorway")
 COLOURINGS = ("room", "distance to goal", "row", "column", "state density")
+WORST_CELL = "costliest mistake"  # the cell where the learned choice loses the most value
 
 
 def _reps(run: RunData) -> FBRepresentations:
@@ -114,10 +127,12 @@ class RepresentationProjection(RepresentationPanel):
         fig = go.Figure()
         colour = self._colour(reps, options)
         if options["color"] == "room":
-            for room in ROOM_ORDER:
+            for index, room in enumerate(ROOM_ORDER):
                 mask = np.array([room_of(s) == room for s in reps.states])
                 if mask.any():
-                    fig.add_trace(self._scatter(coords[mask], np.array(labels)[mask], room, None))
+                    trace = self._scatter(coords[mask], np.array(labels)[mask], room, None)
+                    trace.marker.color = series_colour(index)
+                    fig.add_trace(trace)
         else:
             fig.add_trace(self._scatter(coords, np.array(labels), options["color"], colour))
         if dims == 2:
@@ -150,7 +165,7 @@ class RepresentationProjection(RepresentationPanel):
         marker: dict[str, Any] = {"size": 7 if coords.shape[1] == 2 else 4}
         if colour is not None:
             marker.update(
-                color=colour, colorscale="Viridis", showscale=True, colorbar={"thickness": 12}
+                color=colour, colorscale=COUNT_SCALE, showscale=True, colorbar={"thickness": 12}
             )
         common = {
             "mode": "markers",
@@ -191,23 +206,30 @@ class RepresentationSimilarity(RepresentationPanel):
         if options["measure"] == "cosine":
             rows = rows / np.maximum(np.linalg.norm(rows, axis=1, keepdims=True), 1e-12)
         similarity = rows @ rows.T
-        ticks = [f"{cell_label(reps.states[i])} {room_of(reps.states[i])}" for i in order]
+        names = [f"{cell_label(reps.states[i])} {room_of(reps.states[i])}" for i in order]
+        rooms = [room_of(reps.states[i]) for i in order]
         limit = float(np.abs(similarity).max())
         fig = go.Figure(
             go.Heatmap(
                 z=similarity,
-                x=ticks,
-                y=ticks,
-                colorscale="RdBu",
-                zmid=0,
+                text=[[f"{a} vs {b}" for b in names] for a in names],
+                colorscale=SCORE_SCALE,
                 zmin=-limit,
                 zmax=limit,
-                hovertemplate="%{y} vs %{x}: %{z:.2f}<extra></extra>",
+                hovertemplate="%{text}: %{z:.2f}<extra></extra>",
                 colorbar={"thickness": 12},
             )
         )
-        fig.update_yaxes(autorange="reversed", showticklabels=False)
-        fig.update_xaxes(showticklabels=False)
+        # Label each room's block at its middle, and draw thin lines between blocks.
+        blocks = [room for room in ROOM_ORDER if room in rooms]
+        middles = [rooms.index(room) + (rooms.count(room) - 1) / 2 for room in blocks]
+        axis = {"tickvals": middles, "ticktext": blocks, "showgrid": False, "zeroline": False}
+        fig.update_xaxes(**axis)
+        fig.update_yaxes(autorange="reversed", **axis)
+        for room in blocks[1:]:
+            edge = rooms.index(room) - 0.5
+            fig.add_hline(y=edge, line={"color": "white", "width": 1})
+            fig.add_vline(x=edge, line={"color": "white", "width": 1})
         title = (
             f"{_short(options['representation'])} {options['measure']} similarity · ordered by room"
         )
@@ -226,17 +248,55 @@ class BSpectrum(RepresentationPanel):
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         reps = _reps(runs[0])
+        states, d = reps.backward.shape
+        # Centring removes one direction: S states span at most S - 1, whatever d is.
+        possible = min(d, states - 1)
         singular = np.linalg.svd(reps.backward - reps.backward.mean(axis=0), compute_uv=False)
+        singular = singular[:possible]
         energy = singular**2 / (singular**2).sum()
         positive = energy[energy > 0]
         effective_rank = float(np.exp(-(positive * np.log(positive)).sum()))
         fig = go.Figure(
-            go.Bar(x=np.arange(1, len(singular) + 1), y=singular, name="singular value")
+            go.Bar(
+                x=np.arange(1, len(singular) + 1),
+                y=singular,
+                name="singular value",
+                marker_color=series_colour(0),
+            )
         )
         fig.update_xaxes(title="component")
         fig.update_yaxes(title="singular value", type="log" if options["log"] else "linear")
-        d = reps.backward.shape[1]
-        return STYLE.apply(fig, f"{self.title} · effective rank {effective_rank:.1f} of d = {d}")
+        bound = f"at most {possible} ({states} states − 1, d = {d})"
+        return STYLE.apply(fig, f"{self.title} · effective rank {effective_rank:.1f} of {bound}")
+
+
+def _hide_scale(fig: go.Figure) -> None:
+    """Hide the colour bar of the heatmap just added (it repeats its neighbour's)."""
+    fig.data[-1].showscale = False
+
+
+def _ring(
+    fig: go.Figure, cell: tuple[int, ...], *, col: int, name: str = "start", size: int = 18
+) -> None:
+    fig.add_trace(
+        go.Scatter(
+            x=[cell[1]],
+            y=[cell[0]],
+            mode="markers",
+            marker={"symbol": "circle-open", "size": size, "color": INK, "line": {"width": 3}},
+            name=name,
+            showlegend=col == 1,
+            hoverinfo="skip",
+        ),
+        row=1,
+        col=col,
+    )
+
+
+def _mass(values: np.ndarray, density: np.ndarray) -> float:
+    """Occupancy mass of a density m/ρ: the sum of m = (m/ρ)·ρ over visited states."""
+    keep = np.isfinite(values)
+    return float((values[keep] * density[keep]).sum())
 
 
 @dataclass(frozen=True)
@@ -244,7 +304,10 @@ class OccupancyMaps(RepresentationPanel):
     name = "occupancy_maps"
     title = "Occupancy: learned vs exact"
     scope = "run"
-    description = "Learned F(s0, a, z)·B(t) next to the exact occupancy density m/ρ from one start."
+    description = (
+        "Learned F(s0, a, z)·B(t) next to the exact occupancy density m/ρ from one start, and "
+        "their difference: where the learned occupancy is missing mass (red) or has too much."
+    )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
         starts = tuple(cell_label(s) for s in _reps(runs[0]).states)
@@ -269,74 +332,227 @@ class OccupancyMaps(RepresentationPanel):
         else:
             action = list(ARROWS.values()).index(options["action"])
             learned, reference = predicted[action], exact[action]
+        density = reps.state_density.astype(np.float64)
+        share = _mass(learned, density) / max(_mass(reference, density), 1e-12)
+        correlation = _correlation(learned, reference)
         if options["log"]:
             learned = np.log10(np.clip(learned, 1e-3, None))
             reference = np.log10(np.clip(reference, 1e-3, None))
+        difference = learned - reference
         finite = np.concatenate([learned[np.isfinite(learned)], reference[np.isfinite(reference)]])
         low, high = float(finite.min()), float(finite.max())
+        unit = "log10 m/ρ" if options["log"] else "m/ρ"
         fig = make_subplots(
-            rows=1, cols=2, subplot_titles=("learned F·B", "exact m/ρ"), horizontal_spacing=0.08
+            rows=1,
+            cols=3,
+            subplot_titles=("learned F·B", "exact m/ρ", "learned − exact"),
+            horizontal_spacing=0.07,
         )
         for col, values in enumerate((learned, reference), start=1):
             cells = {state: float(v) for state, v in zip(reps.states, values, strict=True)}
-            colorbar = {"thickness": 12, "title": "log10" if options["log"] else ""}
-            add_grid(fig, cells, row=1, col=col, zmin=low, zmax=high, colorbar=colorbar)
-            add_goal(fig, reps.goals[goal], row=1, col=col)
-            fig.add_trace(
-                go.Scatter(
-                    x=[reps.states[start][1]],
-                    y=[reps.states[start][0]],
-                    mode="markers",
-                    marker={
-                        "symbol": "circle-open",
-                        "size": 16,
-                        "color": "white",
-                        "line": {"width": 3},
-                    },
-                    name="start",
-                    showlegend=col == 1,
-                ),
-                row=1,
-                col=col,
-            )
-        lock_aspect(fig, subplots=2)
-        return STYLE.apply(fig, f"{self.title} · correlation {_correlation(learned, reference)}")
-
-
-@dataclass(frozen=True)
-class ValueMap(RepresentationPanel):
-    name = "value_map"
-    title = "Value: learned vs exact optimal"
-    scope = "run"
-    description = "Learned max_a F(s, a, z)·z next to the exact optimal goal-reaching value V*(s)."
-
-    def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
-        return (_goal_choice(runs[0]),)
-
-    def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
-        reps = _reps(runs[0])
-        goal_cell = parse_cell(options["goal"])
-        goal = reps.goal_index(goal_cell)
-        learned = reps.q_values(goal).max(axis=1)
-        oracle = build_goal_oracle(ENV.tabular_dynamics(), goal_cell, gamma=reps.gamma)
-        exact = np.array([oracle.optimal.values[oracle.dynamics.index_of(s)] for s in reps.states])
-        fig = make_subplots(
-            rows=1, cols=2, subplot_titles=("learned max_a Q", "exact V*"), horizontal_spacing=0.12
-        )
-        for col, values in enumerate((learned, exact), start=1):
-            cells = {state: float(v) for state, v in zip(reps.states, values, strict=True)}
-            colorbar = {"thickness": 12, "x": 0.45 if col == 1 else 1.0}
             add_grid(
                 fig,
                 cells,
                 row=1,
                 col=col,
-                zmin=float(values.min()),
-                zmax=float(values.max()),
-                colorbar=colorbar,
+                zmin=low,
+                zmax=high,
+                colorscale=COUNT_SCALE,
+                colorbar={"thickness": 12, "title": unit, "x": 0.64},
             )
+            if col == 1:
+                _hide_scale(fig)
+        bound = float(np.nanmax(np.abs(difference))) or 1.0
+        cells = {state: float(v) for state, v in zip(reps.states, difference, strict=True)}
+        add_grid(
+            fig,
+            cells,
+            row=1,
+            col=3,
+            zmin=-bound,
+            zmax=bound,
+            colorscale=SCORE_SCALE,
+            colorbar={"thickness": 12, "title": "difference", "x": 1.0},
+        )
+        for col in (1, 2, 3):
+            add_goal(fig, reps.goals[goal], row=1, col=col)
+            _ring(fig, reps.states[start], col=col)
+        lock_aspect(fig, subplots=3)
+        fig = STYLE.apply(
+            fig,
+            f"{self.title} · correlation {correlation} · learned mass {share:.0%} of exact",
+        )
+        fig.update_layout(legend={"orientation": "h", "x": 0, "y": -0.06})
+        return fig
+
+
+def _goal_values(reps: FBRepresentations, goal: int) -> tuple[np.ndarray, ...]:
+    """Learned and exact Q(s, a) for z = B(goal), all in FB's units m(s, a, goal)/ρ(goal).
+
+    Learned: F(s, a, z)·z. Exact, same policy: the occupancy of the goal under FB's own target
+    policy. Exact, optimal: the best possible occupancy of the goal (continuing: reward 1 in
+    the goal, the current state included, nothing terminal). Each is [S, A].
+    """
+    cell = reps.goals[goal]
+    index = reps.state_index(cell)
+    dynamics = ENV.tabular_dynamics()
+    order = [dynamics.index_of(state) for state in reps.states]
+    rewards = np.zeros(dynamics.num_states)
+    rewards[dynamics.index_of(cell)] = 1.0
+    optimal = optimal_solution(dynamics, rewards, gamma=reps.gamma)
+    rho = float(reps.state_density[index])
+    scale = 1.0 / rho if rho > 0 else np.nan
+    return (
+        reps.q_values(goal).astype(np.float64),
+        reps.exact_density[goal][:, :, index].astype(np.float64),
+        optimal.action_values[order] * scale,
+        optimal.optimal_actions[order],
+    )
+
+
+REFERENCES = ("same policy", "optimal policy")
+
+
+@dataclass(frozen=True)
+class ValueMap(RepresentationPanel):
+    name = "value_map"
+    title = "Value: learned vs exact"
+    scope = "run"
+    description = (
+        "Learned value F·z of z = B(goal) next to the exact value of the same objective (the "
+        "goal's discounted occupancy over ρ): under FB's own policy, or under an optimal one."
+    )
+
+    def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
+        return (
+            _goal_choice(runs[0]),
+            Choice("reference", "Exact reference", REFERENCES, REFERENCES[0]),
+        )
+
+    def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
+        reps = _reps(runs[0])
+        goal = reps.goal_index(parse_cell(options["goal"]))
+        learned_q, on_policy, optimal, _ = _goal_values(reps, goal)
+        if options["reference"] == "same policy":
+            policy = reps.target_policy[goal].astype(np.float64)
+            learned = (policy * learned_q).sum(axis=1)
+            exact = (policy * on_policy).sum(axis=1)
+            names = ("learned V^π = Σ π F·z", "exact V^π")
+        else:
+            learned, exact = learned_q.max(axis=1), optimal.max(axis=1)
+            names = ("learned max_a F·z", "exact V*")
+        finite = np.concatenate([learned[np.isfinite(learned)], exact[np.isfinite(exact)]])
+        low, high = float(finite.min()), float(finite.max())
+        fig = make_subplots(rows=1, cols=2, subplot_titles=names, horizontal_spacing=0.08)
+        for col, values in enumerate((learned, exact), start=1):
+            cells = {state: float(v) for state, v in zip(reps.states, values, strict=True)}
+            add_grid(
+                fig,
+                cells,
+                row=1,
+                col=col,
+                zmin=low,
+                zmax=high,
+                colorscale=COUNT_SCALE,
+                colorbar={"thickness": 12, "title": "m/ρ of goal"},
+            )
+            if col == 1:
+                _hide_scale(fig)
             add_goal(fig, reps.goals[goal], row=1, col=col)
         lock_aspect(fig, subplots=2)
         non_goal = np.array([s != reps.goals[goal] for s in reps.states])
         correlation = _correlation(learned[non_goal], exact[non_goal])
-        return STYLE.apply(fig, f"{self.title} · correlation {correlation}")
+        keep = non_goal & np.isfinite(exact)
+        ratio = learned[keep].sum() / max(exact[keep].sum(), 1e-12)
+        fig = STYLE.apply(
+            fig,
+            f"{self.title} ({options['reference']}) · correlation {correlation}"
+            f" · learned is {ratio:.0%} of exact",
+        )
+        fig.update_layout(legend={"orientation": "h", "x": 0, "y": -0.06})
+        return fig
+
+
+@dataclass(frozen=True)
+class ActionValues(RepresentationPanel):
+    name = "action_values"
+    title = "Action values"
+    scope = "run"
+    description = (
+        "Why FB picks an action, for z = B(goal): a map of the cells where its best learned "
+        "action is not optimal, and the learned and exact value of each action in one cell."
+    )
+
+    def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
+        reps = _reps(runs[0])
+        cells = (WORST_CELL, *(cell_label(s) for s in reps.states))
+        return (_goal_choice(runs[0]), Choice("cell", "Cell", cells, WORST_CELL))
+
+    def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
+        reps = _reps(runs[0])
+        goal = reps.goal_index(parse_cell(options["goal"]))
+        learned, on_policy, optimal, best = _goal_values(reps, goal)
+        greedy = learned.argmax(axis=1)
+        states = np.arange(len(reps.states))
+        goal_state = reps.state_index(reps.goals[goal])
+        right = best[states, greedy]
+        right[goal_state] = True  # every action is as good at the goal; not a mistake
+        # What the learned choice costs, as a share of the best action's value there.
+        loss = 1 - optimal[states, greedy] / np.maximum(optimal.max(axis=1), 1e-12)
+        if options["cell"] == WORST_CELL:
+            cell = int(np.argmax(np.where(right, -np.inf, loss))) if (~right).any() else 0
+        else:
+            cell = reps.state_index(parse_cell(options["cell"]))
+        fig = make_subplots(
+            rows=1,
+            cols=2,
+            column_widths=[0.55, 0.45],
+            subplot_titles=("best learned action", f"actions in {cell_label(reps.states[cell])}"),
+            horizontal_spacing=0.1,
+        )
+        add_grid(fig, row=1, col=1)
+        # In the dynamics' state order, as the shared map helpers expect.
+        dynamics = ENV.tabular_dynamics()
+        actions = np.empty(dynamics.num_states, dtype=np.int64)
+        mask = np.ones((dynamics.num_states, len(ARROWS)), dtype=bool)
+        for index, state in enumerate(reps.states):
+            actions[dynamics.index_of(state)] = greedy[index]
+            mask[dynamics.index_of(state)] = best[index]
+        add_actions(fig, dynamics, actions, mask, skip=dynamics.index_of(reps.goals[goal]))
+        add_goal(fig, reps.goals[goal], row=1, col=1)
+        _ring(fig, reps.states[cell], col=1, name="cell", size=28)  # clear of a marked arrow
+        series = (
+            ("learned F·z", learned),
+            ("exact, same policy", on_policy),
+            ("exact, optimal", optimal),
+        )
+        for index, (name, values) in enumerate(series):
+            row = values[cell]
+            relative = row / max(float(np.nanmax(row)), 1e-12)  # the scales differ by up to ~50×
+            fig.add_trace(
+                go.Bar(
+                    x=list(ARROWS.values()),
+                    y=relative,
+                    customdata=row,
+                    name=name,
+                    marker_color=series_colour(index),
+                    hovertemplate=(
+                        f"{name} %{{x}}: %{{y:.0%}} of the best ({'%{customdata:.3g}'} m/ρ)"
+                        "<extra></extra>"
+                    ),
+                ),
+                row=1,
+                col=2,
+            )
+        fig.update_yaxes(title="value / best action's value", tickformat=".0%", row=1, col=2)
+        lock_aspect(fig)
+        fig.update_layout(barmode="group", legend={"orientation": "h", "x": 0, "y": -0.08})
+        verdict = "optimal" if right[cell] else f"not optimal ({loss[cell]:.1%} below the best)"
+        summary = (
+            f"optimal in {right[states != goal_state].mean():.0%} of cells · "
+            f"{cell_label(reps.states[cell])}: learned {ARROWS[int(greedy[cell])]}, {verdict}"
+        )
+        title = f"{self.title} · goal {cell_label(reps.goals[goal])}"
+        fig = STYLE.apply(fig, f"{title}<br><sup>{summary}</sup>")
+        fig.update_layout(margin={**STYLE.margin, "t": 90})  # room for the summary line
+        return fig

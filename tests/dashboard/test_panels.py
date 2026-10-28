@@ -162,7 +162,8 @@ def test_layouts_roundtrip_and_override_built_ins(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "name", ["projection", "similarity", "b_spectrum", "occupancy_maps", "value_map"]
+    "name",
+    ["projection", "similarity", "b_spectrum", "occupancy_maps", "value_map", "action_values"],
 )
 def test_representation_panels_render_from_the_artifact(name, four_rooms_run):
     run = four_rooms_run()
@@ -177,6 +178,7 @@ def test_representation_panels_render_from_the_artifact(name, four_rooms_run):
         {},
         {"dimensions": 3, "color": "distance to goal"},
         {"action": "→", "log": True},
+        {"reference": "optimal policy", "cell": "1,1"},
     ):
         figure = panel.render([data], panel.resolve_options([data], overrides))
         assert figure.data
@@ -466,3 +468,26 @@ def test_fate_map_marks_optimal_loops(four_rooms_run):
     assert "100% of starts reach an optimal loop" in figure.layout.title.text
     ticks = next(t for t in figure.data if t.type == "heatmap" and t.colorbar.ticktext)
     assert all("✓ optimal" in tick for tick in ticks.colorbar.ticktext if tick.startswith("loop"))
+
+
+def test_representation_panels_compare_like_with_like(four_rooms_run):
+    run = four_rooms_run()
+    add_representations(run)
+    data = populate(run)
+    reps = data.representations
+    occupancy = PANELS["occupancy_maps"].render(
+        [data], PANELS["occupancy_maps"].resolve_options([data], {})
+    )
+    assert "learned mass" in occupancy.layout.title.text and len(occupancy.layout.annotations) == 3
+    value = PANELS["value_map"].render([data], PANELS["value_map"].resolve_options([data], {}))
+    assert "(same policy)" in value.layout.title.text and "% of exact" in value.layout.title.text
+    spectrum = PANELS["b_spectrum"].render([data], {"log": True})
+    states, d = reps.backward.shape
+    assert len(spectrum.data[0].y) == min(d, states - 1)
+    assert f"at most {min(d, states - 1)}" in spectrum.layout.title.text
+    actions = PANELS["action_values"].render(
+        [data], PANELS["action_values"].resolve_options([data], {"cell": "9,9"})
+    )
+    bars = [t for t in actions.data if t.type == "bar"]
+    assert [b.name for b in bars] == ["learned F·z", "exact, same policy", "exact, optimal"]
+    assert all(max(b.y) == pytest.approx(1.0) for b in bars)  # relative to each best action
