@@ -32,24 +32,25 @@ from aeris.dashboard.data import RunData
 from aeris.dashboard.panels.base import STYLE, Choice, Option, Output, Toggle
 from aeris.dashboard.panels.grid import (
     ARROWS,
+    COUNT_SCALE,
     ENV,
+    INK,
+    MUTED,
+    SCORE_SCALE,
     add_goal,
     add_playback,
     cell_label,
     grid_figure,
     parse_cell,
+    reward_colours,
     run_goal,
 )
-from aeris.dashboard.panels.tasks import SuitePanel, _protocol_choice, _suite
-from aeris.domain.reports import SuiteTaskResult
+from aeris.dashboard.panels.tasks import SuitePanel, _fmt, _protocol_choice, _suite
+from aeris.domain.reports import SuiteTaskResult, ZeroShotSuiteReport
 from aeris.environments.four_rooms import Position
 from aeris.environments.tabular import TabularDynamics
 
-INK, MUTED = "#0b0b0b", "#52514e"
 AGENT, OTHER_PROTOCOL = "#eb6834", "#6250d6"  # categorical slots 2 and 7
-REWARD_SCALE = [[0.0, "#fcfcfb"], [1.0, "#86b6ef"]]  # recessive: the paths carry the story
-COUNT_SCALE = [[0.0, "#cde2fb"], [1.0, "#104281"]]  # sequential blue
-SCORE_SCALE = [[0.0, "#b02b2b"], [0.5, "#f0efec"], [1.0, "#1c5cab"]]  # worse than random < 0 < 1
 STATUS = {
     AT_GOAL: "#f0efec",
     OPTIMAL: "#0ca30c",
@@ -60,6 +61,7 @@ STATUS = {
 CYCLE_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a")  # a map compares all pairs: three hues at most
 OTHER_CYCLES = "#a3a29c"
 COLOURINGS = ("outcome", "start score", "visits")
+LOWEST = "lowest-scoring task"  # a task choice resolved per run and evidence protocol
 
 
 @dataclass(frozen=True)
@@ -84,7 +86,7 @@ class _Behaviour:
 def _behaviour(run: RunData, task_id: str, protocol: str) -> _Behaviour:
     report = _suite(run)
     assert report is not None
-    result = report.result(task_id)
+    result = report.result(_lowest(report, protocol) if task_id == LOWEST else task_id)
     dynamics = ENV.tabular_dynamics()
     order = [dynamics.index_of(state) for state in report.states]
     policies = {}
@@ -108,13 +110,31 @@ def _behaviour(run: RunData, task_id: str, protocol: str) -> _Behaviour:
     )
 
 
-def _task_choice(runs: Sequence[RunData]) -> Choice:
-    """Every suite task; the run's own training goal first if it has one."""
+def _lowest(report: ZeroShotSuiteReport, protocol: str) -> str:
+    """The task with the lowest normalized score under ``protocol``."""
+    scored = [
+        (score, t.task.task_id)
+        for t in report.tasks
+        if (score := t.outcomes[protocol].normalized_score) is not None
+    ]
+    return min(scored)[1] if scored else report.tasks[0].task.task_id
+
+
+def _task_choice(runs: Sequence[RunData], prefer: str | None = None) -> Choice:
+    """Every suite task, after the lowest-scoring one; by default the ``prefer`` task, else the
+    run's own training goal, else the first task."""
     report = _suite(runs[0])
     ids = tuple(t.task.task_id for t in report.tasks) if report else ()
     goal = run_goal(runs[0])
-    preferred = ENV.goal_task(goal).task_id if goal is not None else None
-    return Choice("task", "Task", ids, preferred if preferred in ids else (ids[0] if ids else None))
+    if prefer is None and goal is not None:
+        prefer = ENV.goal_task(goal).task_id
+    default = prefer if prefer in ids else (ids[0] if ids else None)
+    return Choice("task", "Task", (LOWEST, *ids) if ids else (), default)
+
+
+def _task_title(b: _Behaviour, options: Mapping[str, Any]) -> str:
+    task = b.result.task.task_id
+    return f"{task} (lowest score)" if options["task"] == LOWEST else task
 
 
 def _xy(dynamics: TabularDynamics, states: Sequence[int]) -> tuple[list[int], list[int]]:
@@ -163,14 +183,7 @@ class RolloutReplay(SuitePanel):
         path = rollout(dynamics, b.actions, start, goal=b.goal)
         solution = optimal_solution(dynamics, b.rewards, gamma=b.gamma)
         cells = {dynamics.states[s]: float(r) for s, r in enumerate(b.rewards)}
-        low, high = float(b.rewards.min()), float(b.rewards.max())
-        fig = grid_figure(
-            cells,
-            zmin=low if low < high else low - 1,
-            zmax=high,
-            colorscale=REWARD_SCALE,
-            colorbar_title="reward",
-        )
+        fig = grid_figure(cells, colorbar_title="reward", **reward_colours(b.rewards))
         if options["optimal"]:
             best = np.argmax(solution.optimal_actions, axis=1)
             x, y = _xy(dynamics, rollout(dynamics, best, start, goal=b.goal).states)
@@ -295,7 +308,7 @@ class RolloutReplay(SuitePanel):
             same = other.states == path.states
             parts.append(f"{others[0]}: {'same path' if same else 'different path'}")
         fig.update_traces(showscale=False, selector={"type": "heatmap"})  # reward: on hover
-        title = f"{b.result.task.task_id} · {b.protocol} · from {options['start']}"
+        title = f"{_task_title(b, options)} · {b.protocol} · from {options['start']}"
         return STYLE.apply(fig, f"{title}<br><sup>{' · '.join(parts)}</sup>")
 
 
@@ -410,7 +423,7 @@ class FateMap(SuitePanel):
             add_loops(fig, dynamics, fates)
         if b.goal_cell is not None:
             add_goal(fig, b.goal_cell)
-        title = f"{self.title} · {b.result.task.task_id} · {b.protocol}"
+        title = f"{self.title} · {_task_title(b, options)} · {b.protocol}"
         return finish_map(fig, title, summary)
 
     def _cycle_outcomes(
@@ -450,15 +463,25 @@ class FateMap(SuitePanel):
                 + labels[len(shown) :],
             },
         )
-        solution = optimal_solution(b.dynamics, b.rewards, gamma=b.gamma)
-        best = policy_fates(b.dynamics, np.argmax(solution.optimal_actions, axis=1))
-        agent = max(_loop_reward(b, c) for c in fates.cycles)
-        optimal = max(_loop_reward(b, c) for c in best.cycles)
-        loops = len(fates.cycles)
-        return (
-            f"{loops} loop{'s' * (loops != 1)} · best loop's mean reward {agent:.2f}"
-            f" (an optimal policy's: {optimal:.2f})"
-        )
+        return loop_summary(b, fates)
+
+
+def loop_summary(b: _Behaviour, fates: PolicyFates) -> str:
+    """How many loops the policy ends in, and how many starts end in an optimal one: a loop
+    collecting as much reward per step as the best loop of an optimal policy."""
+    solution = optimal_solution(b.dynamics, b.rewards, gamma=b.gamma)
+    best = policy_fates(b.dynamics, np.argmax(solution.optimal_actions, axis=1))
+    optimal = max(_loop_reward(b, c) for c in best.cycles)
+    rewards = np.array([_loop_reward(b, c) for c in fates.cycles])
+    reached = rewards[fates.cycle_of[fates.cycle_of >= 0]] >= optimal - 1e-9
+    loops = len(fates.cycles)
+    text = (
+        f"{loops} loop{'s' * (loops != 1)} · {reached.mean():.0%} of starts reach an "
+        f"optimal loop (r̄ {optimal:.2f})"
+    )
+    if rewards.max() < optimal - 1e-9:
+        text += f", the agent's best: {rewards.max():.2f}"
+    return text
 
 
 def _ranked_cycles(fates: PolicyFates) -> list[int]:
@@ -545,8 +568,26 @@ def finish_map(fig: go.Figure, title: str, summary: str) -> go.Figure:
     return fig
 
 
-def add_loops(fig: go.Figure, dynamics: TabularDynamics, fates: PolicyFates) -> None:
-    """Each loop as a closed ink outline over its cells."""
+def add_loops(
+    fig: go.Figure, dynamics: TabularDynamics, fates: PolicyFates, *, rings: bool = False
+) -> None:
+    """Each loop as a closed ink outline over its cells; or, with ``rings``, its cells circled,
+    leaving the arrows inside them readable."""
+    if rings:
+        cells = sorted({s for cycle in fates.cycles for s in cycle})
+        x, y = _xy(dynamics, cells)
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="markers",
+                marker={"symbol": "circle-open", "size": 26, "color": INK, "line": {"width": 2}},
+                name="loop (where it ends up)",
+                showlegend=bool(cells),
+                hoverinfo="skip",
+            )
+        )
+        return
     for rank, c in enumerate(_ranked_cycles(fates)):
         cycle = list(fates.cycles[c])
         x, y = _xy(dynamics, cycle + cycle[:1])
@@ -563,3 +604,62 @@ def add_loops(fig: go.Figure, dynamics: TabularDynamics, fates: PolicyFates) -> 
                 hoverinfo="skip",
             )
         )
+
+
+@dataclass(frozen=True)
+class TaskPolicy(SuitePanel):
+    name = "task_policy"
+    title = "Task policy"
+    scope = "run"
+    description = (
+        "One task's reward in every cell with the action the agent inferred for it: suboptimal "
+        "actions white on ink, the loops it ends in circled."
+    )
+
+    def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
+        report = _suite(runs[0])
+        rooms = [t.task.task_id for t in report.tasks if t.family == "room"] if report else []
+        return (
+            _task_choice(runs, prefer=rooms[0] if rooms else None),
+            _protocol_choice(runs),
+            Toggle("check_optimal", "Mark suboptimal actions", True),
+        )
+
+    def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
+        b = _behaviour(runs[0], options["task"], options["protocol"])
+        dynamics = b.dynamics
+        fates = policy_fates(dynamics, b.actions, goal=b.goal)
+        text = [
+            f"{t} · reward {r:.2f}"
+            for t, r in zip(fate_texts(fates, dynamics), b.rewards, strict=True)
+        ]
+        fig = grid_figure()
+        _cell_heatmap(
+            fig,
+            dynamics,
+            b.rewards,
+            text,
+            colorbar={"title": "reward", "thickness": 12},
+            **reward_colours(b.rewards),
+        )
+        optimal = optimal_solution(dynamics, b.rewards, gamma=b.gamma).optimal_actions
+        add_loops(fig, dynamics, fates, rings=True)
+        add_actions(
+            fig, dynamics, b.actions, optimal if options["check_optimal"] else None, skip=b.goal
+        )
+        if b.goal_cell is not None:
+            add_goal(fig, b.goal_cell)
+        outcome = b.result.outcomes[b.protocol]
+        states = np.arange(dynamics.num_states) != (-1 if b.goal is None else b.goal)
+        wrong = ~optimal[np.arange(dynamics.num_states), b.actions]
+        parts = [
+            f"score {_fmt(outcome.normalized_score)}",
+            f"{wrong[states].mean():.0%} suboptimal actions",
+        ]
+        if outcome.goal_success is not None:
+            parts.append(f"goal reached from {_fmt(outcome.goal_success, percent=True)} of starts")
+        elif fates.cycles:
+            parts.append(loop_summary(b, fates))
+        if outcome.rewarded_samples == 0:
+            parts.append("no rewarded evidence")
+        return finish_map(fig, f"{_task_title(b, options)} · {b.protocol}", " · ".join(parts))

@@ -15,6 +15,23 @@ ColourScale: TypeAlias = str | Sequence[Sequence[Any]]  # a Plotly name or [[sto
 ARROWS = {0: "↑", 1: "↓", 2: "←", 3: "→"}
 ENV = FourRooms()
 
+# Map colours. Backgrounds under arrows stay light so ink arrows remain legible.
+INK, MUTED = "#0b0b0b", "#52514e"
+REWARD_SCALE = [[0.0, "#fcfcfb"], [1.0, "#86b6ef"]]  # sequential, light: low -> high reward
+REWARD_DIVERGING = [[0.0, "#ef9f9a"], [0.5, "#f0efec"], [1.0, "#86b6ef"]]  # negative < 0 < positive
+COUNT_SCALE = [[0.0, "#cde2fb"], [1.0, "#104281"]]  # sequential blue
+SCORE_SCALE = [[0.0, "#b02b2b"], [0.5, "#f0efec"], [1.0, "#1c5cab"]]  # worse than random < 0 < 1
+
+
+def reward_colours(rewards: Sequence[float] | np.ndarray) -> dict[str, Any]:
+    """Heatmap range and scale for a reward map: diverging around 0 when rewards take both
+    signs, sequential from the lowest to the highest reward otherwise."""
+    low, high = float(np.min(rewards)), float(np.max(rewards))
+    if low < 0 < high:
+        bound = max(-low, high)
+        return {"zmin": -bound, "zmax": bound, "colorscale": REWARD_DIVERGING}
+    return {"zmin": low if low < high else low - 1, "zmax": high, "colorscale": REWARD_SCALE}
+
 
 def cell_label(state: tuple[int, ...]) -> str:
     """A cell as an option value: ``"row,col"``."""
@@ -48,6 +65,7 @@ def add_grid(
     zmax: float | None = 1.0,
     colorscale: ColourScale = "Viridis",
     colorbar: dict | None = None,
+    text_format: str | None = None,
 ) -> None:
     """Draw walls in grey and optional per-cell values into ``fig`` (or one of its subplots)."""
     free = set(ENV.positions)
@@ -73,6 +91,7 @@ def add_grid(
                 colorscale=colorscale,
                 colorbar=colorbar or {"thickness": 12},
                 hovertemplate="row %{y}, col %{x}: %{z:.3g}<extra></extra>",
+                **({"texttemplate": text_format, "textfont": {"size": 10}} if text_format else {}),
             ),
             **place,
         )
@@ -96,8 +115,12 @@ def grid_figure(
     zmax: float = 1.0,
     colorscale: ColourScale = "Viridis",
     colorbar_title: str = "",
+    text_format: str | None = None,
 ) -> go.Figure:
-    """One grid: walls in grey, optional per-cell values as a heatmap, rows growing downwards."""
+    """One grid: walls in grey, optional per-cell values as a heatmap, rows growing downwards.
+
+    ``text_format`` (a Plotly texttemplate such as ``"%{z:.2f}"``) prints each value in its cell.
+    """
     fig = go.Figure()
     add_grid(
         fig,
@@ -106,6 +129,7 @@ def grid_figure(
         zmax=zmax,
         colorscale=colorscale,
         colorbar={"title": colorbar_title, "thickness": 12},
+        text_format=text_format,
     )
     lock_aspect(fig)
     return fig

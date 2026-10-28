@@ -206,9 +206,14 @@ def sidebar(layouts: dict[str, Layout]) -> tuple[Path, list[RunData], bool, int 
 
     st.sidebar.divider()
     names = list(layouts)
+    # A fixed key keeps the widget's identity across reruns; a computed index would not, and
+    # the next choice after a switch would be dropped. Saving a layout queues its name here.
+    if "next_dashboard" in st.session_state:
+        st.session_state.dashboard = st.session_state.pop("next_dashboard")
+    if st.session_state.get("dashboard") not in names:
+        st.session_state.dashboard = names[0]
+    name = st.sidebar.selectbox("Dashboard", names, key="dashboard")
     current: Layout | None = st.session_state.get("layout")
-    default = names.index(current.name) if current is not None and current.name in names else 0
-    name = st.sidebar.selectbox("Dashboard", names, index=default)
     if current is None or st.session_state.get("layout_choice") != name:
         st.session_state.layout = layouts[name]
         st.session_state.layout_choice = name
@@ -234,7 +239,7 @@ def layout_editor(layouts: dict[str, Layout]) -> None:
         st.session_state.layout = layout
         if st.button("Save", type="primary", width="stretch"):
             path = save_layout(LAYOUT_DIR, replace(layout, name=name))
-            st.session_state.layout_choice = name
+            st.session_state.layout_choice = st.session_state.next_dashboard = name
             st.success(f"Saved {path}")
 
 

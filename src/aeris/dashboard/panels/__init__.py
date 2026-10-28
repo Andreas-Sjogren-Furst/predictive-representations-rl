@@ -1,7 +1,7 @@
 """Registered dashboard panels, by name. Add a panel here to make it available in the app."""
 
 from aeris.dashboard.panels.base import Panel
-from aeris.dashboard.panels.behaviour import FateMap, RolloutReplay
+from aeris.dashboard.panels.behaviour import FateMap, RolloutReplay, TaskPolicy
 from aeris.dashboard.panels.evaluation import EvaluationResults
 from aeris.dashboard.panels.maps import PolicyMap, TrajectoryAnimation
 from aeris.dashboard.panels.representations import (
@@ -18,7 +18,6 @@ from aeris.dashboard.panels.tasks import (
     SuiteDistribution,
     SuiteScores,
     SuiteTasks,
-    TaskPolicy,
 )
 from aeris.dashboard.panels.training import LossCurves
 

@@ -216,6 +216,8 @@ def test_suite_panels_render_from_the_report(name, four_rooms_run):
         {"task": "room_top_left", "colour": "start score", "compare": True, "start": "9,9"},
         {"task": "random_dense_0", "colour": "visits"},
         {"actions": True},
+        {"task": "lowest-scoring task", "show": "difference", "order": "suite order"},
+        {"protocol": "all_states", "check_optimal": False},
     ):
         output = panel.render([data], panel.resolve_options([data], overrides))
         assert isinstance(output, Table) or output.data
@@ -227,7 +229,10 @@ def test_task_policy_marks_invisible_tasks(four_rooms_run):
     run.write_report(report)
     data = populate(run)
     first = report.tasks[0].task.task_id  # synthetic: no rewarded dataset evidence
-    figure = PANELS["task_policy"].render([data], {"task": first, "protocol": "dataset_rewards"})
+    panel = PANELS["task_policy"]
+    figure = panel.render(
+        [data], panel.resolve_options([data], {"task": first, "protocol": "dataset_rewards"})
+    )
     assert "no rewarded evidence" in figure.layout.title.text
 
 
@@ -294,6 +299,14 @@ def test_behaviour_panels_roll_out_the_saved_suite_actions(four_rooms_run):
         [data], fates.resolve_options([data], {"task": "reach_1_1", "protocol": "all_states"})
     )
     assert "optimal 99% · detour 0% · late 0% · trapped 1%" in figure.layout.title.text
+    policy = PANELS["task_policy"]
+    figure = policy.render(
+        [data], policy.resolve_options([data], {"task": "reach_1_1", "protocol": "all_states"})
+    )
+    marked = next(t for t in figure.data if t.name == "suboptimal action")
+    rings = next(t for t in figure.data if t.name == "loop (where it ends up)")
+    assert list(zip(marked.y, marked.x, strict=True)) == [(9, 9)]
+    assert list(zip(rings.y, rings.x, strict=True)) == [(9, 9)]
 
 
 def test_policy_map_marks_suboptimal_actions_and_trapped_starts(four_rooms_run):
@@ -361,3 +374,53 @@ def test_loss_curves_draw_one_chart_per_metric(four_rooms_run):
         ),
     )
     assert [trace.name for trace in overlaid.data] == ["fb_loss", "fb_regularization"]
+
+
+def test_lowest_scoring_task_is_resolved_per_protocol(four_rooms_run):
+    run = four_rooms_run()
+    report = synthetic_suite_report()
+    run.write_report(report)
+    data = populate(run)
+    for protocol in report.evidence_protocols:
+        lowest = min(report.tasks, key=lambda t: t.outcomes[protocol].normalized_score)
+        panel = PANELS["fate_map"]
+        options = panel.resolve_options(
+            [data], {"task": "lowest-scoring task", "protocol": protocol}
+        )
+        title = panel.render([data], options).layout.title.text
+        assert f"{lowest.task.task_id} (lowest score) · {protocol}" in title
+
+
+def test_suite_table_puts_the_lowest_score_first_with_the_protocol_gap(four_rooms_run):
+    run = four_rooms_run()
+    run.write_report(synthetic_suite_report())
+    data = populate(run)
+    panel = PANELS["suite_tasks"]
+    table = panel.render([data], panel.resolve_options([data], {}))
+    scores = [row["score · dataset_rewards"] for row in table.rows]
+    assert scores == sorted(scores)
+    row = table.rows[0]
+    gap = row["gap · dataset_rewards − all_states"]
+    assert gap == pytest.approx(
+        row["score · dataset_rewards"] - row["score · all_states"], abs=2e-3
+    )
+
+
+def test_suite_scores_put_the_overall_mean_last(four_rooms_run):
+    run = four_rooms_run()
+    run.write_report(synthetic_suite_report())
+    data = populate(run)
+    panel = PANELS["suite_scores"]
+    figure = panel.render([data], panel.resolve_options([data], {}))
+    assert figure.data[0].x[-1] == "all tasks" and "all" not in figure.data[0].x
+
+
+def test_reward_maps_diverge_around_zero_only_for_signed_rewards():
+    from aeris.dashboard.panels.grid import REWARD_DIVERGING, REWARD_SCALE, reward_colours
+
+    signed = reward_colours(np.array([-2.0, 0.5, 1.0]))
+    assert (signed["zmin"], signed["zmax"]) == (-2.0, 2.0)
+    assert signed["colorscale"] == REWARD_DIVERGING
+    distance = reward_colours(np.array([-1.0, -0.5, 0.0]))
+    assert (distance["zmin"], distance["zmax"]) == (-1.0, 0.0)
+    assert distance["colorscale"] == REWARD_SCALE

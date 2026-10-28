@@ -23,13 +23,15 @@ def test_app_renders_built_in_layouts_and_saves_edits(tmp_path, four_rooms_run, 
 
     at.sidebar.selectbox[0].set_value("Zero-shot suite").run()
     assert not at.exception
-    assert len(at.get("plotly_chart")) == 6, (
-        "suite charts: scores, distribution, 3 task policies, goals"
+    assert len(at.get("plotly_chart")) == 8, (
+        "suite charts: scores, distribution, goals, lowest-scoring fates, 4 task policies"
     )
 
-    at.sidebar.selectbox[0].set_value("Representations").run()
+    at.sidebar.selectbox[0].set_value("Representations").run()  # a second switch in a row
     assert not at.exception
-    assert len(at.get("plotly_chart")) == 6, "every representation panel draws"
+    charts = at.get("plotly_chart")
+    assert len(charts) == 6, "every representation panel draws"
+    assert all(chart.key.startswith("Representations|") for chart in charts)
 
     at.sidebar.multiselect[0].set_value(["first", "second"]).run()
     at.sidebar.selectbox[0].set_value("Compare runs").run()

@@ -50,13 +50,13 @@ A panel whose data is missing says so and names the command that creates it, for
 | `evaluation` | many runs | recorded evaluation metrics per checkpoint |
 | `policy_map` | one run | the training goal's saved policy (z = B(goal), initial or final): the action in every cell, suboptimal ones white on ink, over the outcome from each start (optimal, detour, late, trapped) |
 | `trajectory` | one run | an animated replay of a recorded evaluation episode |
-| `suite_scores` | many runs | zero-shot mean normalized score per task family; groups get ± std error bars |
-| `suite_distribution` | many runs | every task's zero-shot score, grouped by family |
-| `task_policy` | one run | one task's reward map with the action the agent inferred in every cell |
-| `goal_scores_map` | one run | zero-shot score or goal success per goal cell |
+| `suite_scores` | many runs | zero-shot mean normalized score per task family, then over all tasks; groups get ± std error bars |
+| `suite_distribution` | many runs | every task's zero-shot score, grouped by family; or the difference between the two evidence protocols per task |
+| `task_policy` | one run | one task's reward map with the action the agent inferred in every cell: suboptimal actions white on ink, the loops it ends in circled; the subtitle gives the share of starts that reach an optimal loop (one collecting as much reward per step as an optimal policy's best loop) |
+| `goal_scores_map` | one run | zero-shot score or goal success per goal cell, printed in each cell |
 | `rollout` | one run | the exact path of a zero-shot policy for any suite task from any start, animated, next to an optimal path; suboptimal actions marked |
 | `fate_map` | one run | every start cell coloured by where the zero-shot policy takes it (optimal, detour, late, trapped; or which loop), by start score, or by how many paths pass through; optionally with the action in every cell |
-| `suite_tasks` | one run | a table of every suite task's results |
+| `suite_tasks` | one run | a table of every suite task's results, lowest score first, with the gap between evidence protocols |
 | `report` | one run | the numbers of any saved analysis report, rounded |
 | `run_overview` | one run | every recorded setting by section (run, experiment, dataset, agent, training, …); provenance on request; ⚠ marks uncommitted code, errors and unfinished runs |
 | `projection` | one run | PCA (2-D or 3-D) of each state's representation, coloured by room, distance to goal, row, column or state density |
@@ -67,9 +67,20 @@ A panel whose data is missing says so and names the command that creates it, for
 
 ## Behaviour panels
 
-`rollout` and `fate_map` read the actions saved in the zero-shot suite report and roll them out
-exactly on the known dynamics, for any task and any start; no checkpoint is loaded. See
-[exact rollouts and policy fates](analysis/rollouts.md).
+`rollout`, `fate_map` and `task_policy` read the actions saved in the zero-shot suite report and
+roll them out exactly on the known dynamics, for any task and any start; no checkpoint is loaded.
+See [exact rollouts and policy fates](analysis/rollouts.md). Their task choice also offers
+**lowest-scoring task**, resolved per run and evidence protocol, so a saved layout can always show
+the current worst case.
+
+Reward maps colour by what the reward means: light to darker blue from the lowest to the highest
+reward when rewards have one sign (goal, room, distance, random sparse), and red–grey–blue centred
+on 0 when they take both signs (random dense). Scores use red (worse than random), grey (random)
+and blue (optimal) everywhere.
+
+On Four Rooms the two evidence protocols give the same policy for every goal task: the inferred z
+differs only in scale. On the oracle dataset they agree on every task, because it covers every
+state equally. Use the *difference* view of `suite_distribution` to see where they disagree.
 
 ## Representation panels
 

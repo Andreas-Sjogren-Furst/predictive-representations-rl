@@ -51,7 +51,8 @@ second.
   - *outcome*: for goal tasks, optimal / detour / late / trapped. For other tasks, the loop each
     start ends in: the three loops that catch the most starts get their own colour, and the rest
     are shown as "other". Each colour-bar entry gives that loop's mean reward per step, and the
-    subtitle compares the best of them with the best loop of an optimal policy.
+    subtitle gives the share of starts that reach an *optimal loop*, one collecting as much
+    reward per step as the best loop of an optimal policy.
   - *start score*: red below random, grey at random, blue at optimal.
   - *visits*: how many other starts pass through each cell, showing where paths converge.
 

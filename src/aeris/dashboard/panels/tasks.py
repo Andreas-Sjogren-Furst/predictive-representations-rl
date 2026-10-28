@@ -23,9 +23,12 @@ from aeris.dashboard.panels.base import (
     Table,
     series_colour,
 )
-from aeris.dashboard.panels.grid import ARROWS, ENV, add_goal, grid_figure
+from aeris.dashboard.panels.grid import COUNT_SCALE, ENV, MUTED, SCORE_SCALE, grid_figure
 from aeris.dashboard.panels.grouping import group_choice, group_runs, label
 from aeris.domain.reports import ZeroShotSuiteReport
+
+ALL, ALL_LABEL = "all", "all tasks"  # the report's overall mean, shown after the families
+DISTRIBUTIONS = ("score", "difference")
 
 
 def _suite(run: RunData) -> ZeroShotSuiteReport | None:
@@ -80,7 +83,8 @@ class SuiteScores(SuitePanel):
         lowest = 0.0
         for index, (group, members) in enumerate(group_runs(runs, options["group_by"]).items()):
             reports = [r for run in members if (r := _suite(run)) is not None]
-            families = list(dict.fromkeys(f for r in reports for f in r.mean_score))
+            families = [f for f in dict.fromkeys(f for r in reports for f in r.mean_score)]
+            families = [f for f in families if f != ALL] + [ALL]  # the overall mean last
             stats = [
                 summarize(r.mean_score.get(f, {}).get(protocol) for r in reports) for f in families
             ]
@@ -88,7 +92,7 @@ class SuiteScores(SuitePanel):
             lowest = min([lowest, *(m for m in means if m is not None)])
             fig.add_trace(
                 go.Bar(
-                    x=families,
+                    x=[ALL_LABEL if f == ALL else f for f in families],
                     y=means,
                     name=label(group, members),
                     marker_color=series_colour(index),
@@ -102,6 +106,8 @@ class SuiteScores(SuitePanel):
             )
         fig.update_layout(barmode="group")
         fig.update_yaxes(title="normalized score", range=[lowest - 0.05, 1.05])
+        if fig.data:  # set the overall mean apart: its weight follows the family sizes
+            fig.add_vline(x=len(fig.data[0].x) - 1.5, line={"color": MUTED, "dash": "dot"})
         return STYLE.apply(fig, f"{self.title} · {protocol}")
 
 
@@ -111,89 +117,60 @@ class SuiteDistribution(SuitePanel):
     title = "Zero-shot scores per task"
     scope = "runs"
     description = (
-        "Every task's normalized score, grouped by family: spread and outliers, not just means."
+        "Every task's normalized score, grouped by family: spread and outliers, not just means; "
+        "or how much each task's score changes with the other evidence protocol."
     )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
-        return (_protocol_choice(runs),)
+        return (_protocol_choice(runs), Choice("show", "Show", DISTRIBUTIONS, "score"))
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         protocol = options["protocol"]
+        difference = options["show"] == "difference"
+        other = next(
+            (
+                p
+                for run in runs
+                if (r := _suite(run))
+                for p in r.evidence_protocols
+                if p != protocol
+            ),
+            None,
+        )
+        if difference and other is None:
+            return Message("The suite report has only one evidence protocol.")
         fig = go.Figure()
-        for run in runs:
+        for index, run in enumerate(runs):
             report = _suite(run)
             assert report is not None
-            scored = [
-                (t.family, t.outcomes[protocol].normalized_score, t.task.task_id)
-                for t in report.tasks
-            ]
-            scored = [(f, s, i) for f, s, i in scored if s is not None]
+            scored = []
+            for t in report.tasks:
+                score = t.outcomes[protocol].normalized_score
+                if difference and score is not None and other is not None:
+                    base = t.outcomes[other].normalized_score
+                    score = None if base is None else score - base
+                if score is not None:
+                    scored.append((t.family, score, t.task.task_id))
             fig.add_trace(
                 go.Box(
                     x=[f for f, _, _ in scored],
                     y=[s for _, s, _ in scored],
                     text=[i for _, _, i in scored],
                     name=run.label,
+                    marker_color=series_colour(index),
                     boxpoints="all",
                     jitter=0.4,
                     pointpos=0,
-                    hovertemplate="%{text}: %{y:.2f}<extra></extra>",
+                    hovertemplate="%{text}: %{y:.3f}<extra></extra>",
                 )
             )
         fig.update_layout(boxmode="group")
+        if difference:
+            fig.add_hline(y=0, line={"color": MUTED, "dash": "dot"})
+            fig.update_yaxes(title=f"score difference ({protocol} − {other})")
+            return STYLE.apply(fig, f"{self.title} · {protocol} − {other}")
         fig.update_yaxes(title="normalized score")
         return STYLE.apply(fig, f"{self.title} · {protocol}")
-
-
-@dataclass(frozen=True)
-class TaskPolicy(SuitePanel):
-    name = "task_policy"
-    title = "Task policy"
-    scope = "run"
-    description = "One task's reward in every cell with the action the agent inferred for it."
-
-    def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
-        report = _suite(runs[0])
-        ids = tuple(t.task.task_id for t in report.tasks) if report else ()
-        default = next((i for i in ids if i.startswith("room_")), ids[0] if ids else None)
-        return (Choice("task", "Task", ids, default), _protocol_choice(runs))
-
-    def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
-        report = _suite(runs[0])
-        assert report is not None
-        result = report.result(options["task"])
-        outcome = result.outcomes[options["protocol"]]
-        rewards = ENV.state_rewards(result.task)
-        values = {tuple(s): float(r) for s, r in zip(report.states, rewards, strict=True)}
-        low, high = float(rewards.min()), float(rewards.max())
-        if low == high:
-            low, high = low - 1, high + 1
-        fig = grid_figure(values, zmin=low, zmax=high, colorscale="RdBu", colorbar_title="reward")
-        goal = ENV.goal_from_task(result.task) if result.family in ("goal", "distance") else None
-        cells = [
-            (s, a) for s, a in zip(report.states, outcome.actions, strict=True) if tuple(s) != goal
-        ]
-        fig.add_trace(
-            go.Scatter(
-                x=[s[1] for s, _ in cells],
-                y=[s[0] for s, _ in cells],
-                mode="text",
-                text=[ARROWS[a] for _, a in cells],
-                textfont={"size": 15, "color": "#111111"},
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
-        if goal is not None:
-            add_goal(fig, goal)
-        parts = [f"score {_fmt(outcome.normalized_score)}"]
-        if outcome.goal_success is not None:
-            parts.append(f"goal reached from {_fmt(outcome.goal_success, percent=True)} of starts")
-        if outcome.rewarded_samples == 0:
-            parts.append("no rewarded evidence")
-        return STYLE.apply(
-            fig, f"{result.task.task_id} · {options['protocol']} · " + " · ".join(parts)
-        )
 
 
 @dataclass(frozen=True)
@@ -202,7 +179,8 @@ class GoalScoresMap(SuitePanel):
     title = "Zero-shot goal tasks"
     scope = "run"
     description = (
-        "Each goal cell coloured by its task's score or goal success; × = no rewarded evidence."
+        "Each goal cell coloured and labelled by its task's score or goal success; "
+        "× = no rewarded evidence."
     )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
@@ -228,7 +206,15 @@ class GoalScoresMap(SuitePanel):
         cells: dict[tuple[int, ...], float] = {
             ENV.goal_from_task(t.task): v for t in goals if (v := value(t)) is not None
         }
-        fig = grid_figure(cells, colorbar_title=metric)
+        fig = grid_figure(
+            cells,
+            colorbar_title=metric,
+            **(
+                {"zmin": -1.0, "zmax": 1.0, "colorscale": SCORE_SCALE, "text_format": "%{z:.2f}"}
+                if metric == "normalized score"
+                else {"colorscale": COUNT_SCALE, "text_format": "%{z:.0%}"}
+            ),
+        )
         invisible = [
             ENV.goal_from_task(t.task) for t in goals if t.outcomes[protocol].rewarded_samples == 0
         ]
@@ -257,24 +243,48 @@ class SuiteTasks(SuitePanel):
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
         report = _suite(runs[0])
         families = ("all", *dict.fromkeys(t.family for t in report.tasks)) if report else ("all",)
-        return (Choice("family", "Family", families, "all"),)
+        return (
+            Choice("family", "Family", families, "all"),
+            _protocol_choice(runs),
+            Choice("order", "Order", ("lowest score first", "suite order"), "lowest score first"),
+        )
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         report = _suite(runs[0])
         assert report is not None
+        main = options["protocol"]
+        others = [p for p in report.evidence_protocols if p != main]
         rows = []
         for result in report.tasks:
             if options["family"] not in ("all", result.family):
                 continue
+            outcomes = result.outcomes
             row: dict[str, Any] = {"task": result.task.task_id, "family": result.family}
-            for protocol, outcome in result.outcomes.items():
-                row[f"score · {protocol}"] = outcome.normalized_score
-                if outcome.goal_success is not None:
-                    row[f"success · {protocol}"] = outcome.goal_success
+            for protocol in (main, *others):
+                row[f"score · {protocol}"] = _round(outcomes[protocol].normalized_score)
+            for protocol in others:
+                row[f"gap · {main} − {protocol}"] = _round(
+                    _minus(outcomes[main].normalized_score, outcomes[protocol].normalized_score)
+                )
+            for protocol in (main, *others):
+                if outcomes[protocol].goal_success is not None:
+                    row[f"success · {protocol}"] = _round(outcomes[protocol].goal_success)
             row["rewarded samples"] = (
-                result.outcomes["dataset_rewards"].rewarded_samples
-                if "dataset_rewards" in result.outcomes
+                outcomes["dataset_rewards"].rewarded_samples
+                if "dataset_rewards" in outcomes
                 else None
             )
             rows.append(row)
+        if options["order"] == "lowest score first":
+            key = f"score · {main}"
+            rows.sort(key=lambda row: (row[key] is None, row[key]))
         return Table(rows, caption=f"{report.suite}: {report.suite_description}")
+
+
+def _round(value: float | None) -> float | None:
+    """Three decimals: enough to read, and the column still sorts as numbers."""
+    return None if value is None else round(value, 3)
+
+
+def _minus(a: float | None, b: float | None) -> float | None:
+    return None if a is None or b is None else a - b
