@@ -7,11 +7,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from aeris.agents.fb.reports import FBCheckpointReport
-from aeris.analysis.seeds import SeedStatistic, key_metrics, summarize
+from aeris.analysis.seeds import (
+    Interval,
+    SeedStatistic,
+    difference,
+    key_metrics,
+    summarize,
+)
 from aeris.dashboard.data import RunData
 from aeris.dashboard.panels.base import Choice, MultiChoice, Option, Output, Panel, Table
 from aeris.dashboard.panels.grouping import group_choice, group_runs, label
-from aeris.domain.reports import TabularPolicyReport, ZeroShotSuiteReport
+from aeris.domain.reports import AnalysisReport, TabularPolicyReport, ZeroShotSuiteReport
 
 
 def _scalars(data: Mapping[str, Any], prefix: str = "") -> dict[str, Any]:
@@ -127,16 +133,90 @@ def _final_success(run: RunData) -> float | None:
     return None
 
 
+def _episodes(runs: Sequence[RunData]) -> str:
+    counts = sorted({run.evaluations[-1].episode_count for run in runs if run.evaluations})
+    return "/".join(str(c) for c in counts) or "?"
+
+
+# The analysis that saves each report, for "missing" notes.
+ANALYSES: tuple[tuple[type[AnalysisReport], str], ...] = (
+    (TabularPolicyReport, "four-rooms"),
+    (FBCheckpointReport, "fb-checkpoint"),
+    (ZeroShotSuiteReport, "zero-shot"),
+)
+
+
+def missing_analyses(runs: Sequence[RunData]) -> str:
+    """Which analyses some selected runs lack, with the command for the first of them."""
+    notes = []
+    for report_type, command in ANALYSES:
+        absent = [run for run in runs if not isinstance(run.report(report_type), report_type)]
+        if absent:
+            notes.append(
+                f"{command} for {len(absent)} of {len(runs)} runs "
+                f"(aeris analysis {command} {absent[0].root})"
+            )
+    return "Missing analyses: " + "; ".join(notes) if notes else ""
+
+
+def metric_order(name: str, episodes: str | None = None) -> tuple[int, str, str]:
+    """A ``key_metrics`` name as (rank, section, label), exact results first and the
+    sampled evaluation last: ``zero-shot · goal · all_states`` is (…, "zero-shot ·
+    all_states", "goal")."""
+    parts = name.split(" · ")
+    if parts[0] == "final policy":
+        return (0 if parts[1] == "all-start success" else 1), "training goal · exact", parts[1]
+    if parts[0] == "FB":
+        return 10, "FB checkpoint", parts[1]
+    if parts[0] == "zero-shot" and len(parts) == 3:
+        family, protocol = parts[1], parts[2]
+        rank = 20 + (0 if protocol == "dataset_rewards" else 1) * 10 + (0 if family == "all" else 1)
+        return rank, f"zero-shot · {protocol}", "all tasks" if family == "all" else family
+    if parts[0] == "final evaluation":
+        section = "sampled evaluation" + (f" · {episodes} episodes" if episodes else "")
+        return 90, section, " · ".join(parts[1:])
+    return 50, "other", name
+
+
+def run_metrics(runs: Sequence[RunData]) -> dict[str, list[float | None]]:
+    """Each headline number across ``runs`` (None where a run lacks it), in reading order."""
+    per_run = [key_metrics(run.evaluations, run.reports.values()) for run in runs]
+    names = sorted(
+        dict.fromkeys(n for metrics in per_run for n in metrics),
+        key=lambda n: metric_order(n)[0],  # stable: the reports' own order within a rank
+    )
+    return {name: [metrics.get(name) for metrics in per_run] for name in names}
+
+
+def signed(value: float) -> str:
+    return f"{value:+.3f}".replace("-", "−")
+
+
+def interval_text(interval: Interval | None) -> str:
+    if interval is None:
+        return ""
+    mark = " ✓" if interval.excludes_zero else ""
+    return f"{signed(interval.value)} [{signed(interval.low)}, {signed(interval.high)}]{mark}"
+
+
 @dataclass(frozen=True)
 class RunComparison(Panel):
     name = "run_comparison"
     title = "Run comparison"
     scope = "runs"
-    description = "Key settings and results of every selected run side by side."
+    description = "Key settings and results of every selected run, grouped by experiment."
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
+        names = list(dict.fromkeys(run.manifest.experiment.name for run in runs))
+        ordered = sorted(
+            runs,
+            key=lambda run: (
+                names.index(run.manifest.experiment.name),
+                run.manifest.experiment.seed,
+            ),
+        )
         rows = []
-        for run in runs:
+        for run in ordered:
             tabular = run.report(TabularPolicyReport)
             fb = run.report(FBCheckpointReport)
             suite = run.report(ZeroShotSuiteReport)
@@ -145,27 +225,42 @@ class RunComparison(Panel):
             )
             rows.append(
                 {
+                    "experiment": run.manifest.experiment.name,
+                    "seed": run.manifest.experiment.seed,
                     "run": run.label,
                     "status": run.manifest.status,
                     "dataset": run.setting("dataset.origin"),
                     "updates": _strategy(run, "updates"),
                     "hidden": run.setting("agent.hidden_dim"),
                     "d": run.setting("agent.representation_dim"),
-                    "seed": run.manifest.experiment.seed,
-                    "final success": _final_success(run),
-                    "optimal actions": final.optimal_action_fraction if final else None,
-                    "all-start success": final.rollout_success_fraction if final else None,
-                    "occupancy corr": fb.exact_occupancy_correlation
+                    "all-start success": _round(final.rollout_success_fraction if final else None),
+                    "optimal actions": _round(final.optimal_action_fraction if final else None),
+                    "occupancy corr": _round(fb.exact_occupancy_correlation)
                     if isinstance(fb, FBCheckpointReport)
                     else None,
                     **(
-                        {f"zero-shot {p}": v for p, v in suite.mean_score["all"].items()}
+                        {f"zero-shot {p}": _round(v) for p, v in suite.mean_score["all"].items()}
                         if isinstance(suite, ZeroShotSuiteReport)
                         else {}
                     ),
+                    "sampled success": _round(_final_success(run)),
                 }
             )
-        return Table(rows, caption=self.title)
+        caption = " · ".join(
+            part
+            for part in (
+                f"{self.title}: training goal exact over every start; sampled success from "
+                f"the last evaluation ({_episodes(runs)} episodes)",
+                missing_analyses(runs),
+            )
+            if part
+        )
+        return Table(rows, caption=caption)
+
+
+def _round(value: float | None) -> float | None:
+    """Three decimals: enough to read, and the column still sorts as numbers."""
+    return None if value is None else round(value, 3)
 
 
 def _strategy(run: RunData, key: str) -> Any:
@@ -178,7 +273,10 @@ class GroupSummaryTable(Panel):
     name = "group_summary"
     title = "Group summary"
     scope = "runs"
-    description = "Mean ± std across the runs (seeds) of each group, for every headline number."
+    description = (
+        "Mean ± std across the runs (seeds) of each group for every headline number, and each "
+        "group's difference from the first with a 95% interval (Welch); ✓ where it excludes 0."
+    )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
         choice = group_choice(runs)
@@ -187,31 +285,41 @@ class GroupSummaryTable(Panel):
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         groups = group_runs(runs, options["group_by"])
-        columns = {
-            label(group, members): {
-                name: stat
-                for name in dict.fromkeys(
-                    n for run in members for n in key_metrics(run.evaluations, run.reports.values())
+        values = {group: run_metrics(members) for group, members in groups.items()}
+        names = sorted(
+            dict.fromkeys(n for metrics in values.values() for n in metrics),
+            key=lambda n: metric_order(n)[0],
+        )
+        first = next(iter(groups))
+        episodes = _episodes(runs)
+        rows = []
+        for name in names:
+            _, section, metric = metric_order(name, episodes)
+            row: dict[str, Any] = {"section": section, "metric": metric}
+            for group, members in groups.items():
+                stat = summarize(values[group].get(name, []))
+                row[label(group, members)] = _stat(stat, len(members))
+            for group in list(groups)[1:]:
+                row[f"{group} − {first}"] = interval_text(
+                    difference(values[first].get(name, []), values[group].get(name, []))
                 )
-                if (
-                    stat := summarize(
-                        key_metrics(run.evaluations, run.reports.values()).get(name)
-                        for run in members
-                    )
-                )
-                is not None
-            }
-            for group, members in groups.items()
-        }
-        metrics = list(dict.fromkeys(name for stats in columns.values() for name in stats))
-        rows = [
-            {"metric": name, **{group: _stat(stats.get(name)) for group, stats in columns.items()}}
-            for name in metrics
-        ]
-        return Table(rows, caption=f"{self.title} · grouped by {options['group_by']}")
+            rows.append(row)
+        caption = " · ".join(
+            part
+            for part in (
+                f"{self.title} · grouped by {options['group_by']} · difference: mean with "
+                "95% interval (Welch), ✓ where it excludes 0",
+                missing_analyses(runs),
+            )
+            if part
+        )
+        return Table(rows, caption=caption)
 
 
-def _stat(stat: SeedStatistic | None) -> str:
+def _stat(stat: SeedStatistic | None, size: int) -> str:
     if stat is None:
-        return ""
-    return f"{stat.mean:.3f}" if stat.n == 1 else f"{stat.mean:.3f} ± {stat.std:.3f} (n={stat.n})"
+        return "no report"
+    if stat.n == 1:
+        return f"{stat.mean:.3f}"
+    count = "" if stat.n == size else f" (n={stat.n})"
+    return f"{stat.mean:.3f} ± {stat.std:.3f}{count}"

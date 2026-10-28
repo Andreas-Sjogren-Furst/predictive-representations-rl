@@ -7,6 +7,7 @@ records a run saved, so nothing is recomputed.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -41,6 +42,69 @@ def summarize(values: Iterable[float | None]) -> SeedStatistic | None:
         return None
     std = float(defined.std(ddof=1)) if len(defined) > 1 else 0.0
     return SeedStatistic(mean=float(defined.mean()), std=std, n=len(defined))
+
+
+def t_quantile(probability: float, df: float) -> float:
+    """The ``probability`` quantile of Student's t with ``df`` (possibly fractional) degrees
+    of freedom, for ``probability`` above 0.5: bisection on the integrated density."""
+    if not 0.5 < probability < 1 or df <= 0:
+        raise ValueError("needs 0.5 < probability < 1 and df > 0")
+    scale = math.exp(math.lgamma((df + 1) / 2) - math.lgamma(df / 2)) / math.sqrt(df * math.pi)
+
+    def cdf(t: float) -> float:  # Simpson's rule from 0 to t; the density is smooth
+        x = np.linspace(0.0, t, 2001)
+        y = scale * (1 + x**2 / df) ** (-(df + 1) / 2)
+        h = t / 2000
+        return 0.5 + h / 3 * float(y[0] + y[-1] + 4 * y[1:-1:2].sum() + 2 * y[2:-1:2].sum())
+
+    low, high = 0.0, 1.0
+    while cdf(high) < probability:
+        low, high = high, 2 * high
+    for _ in range(60):
+        middle = (low + high) / 2
+        low, high = (middle, high) if cdf(middle) < probability else (low, middle)
+    return (low + high) / 2
+
+
+@dataclass(frozen=True, slots=True)
+class Interval:
+    """An estimate with a confidence interval."""
+
+    value: float
+    low: float
+    high: float
+
+    @property
+    def excludes_zero(self) -> bool:
+        return self.low > 0 or self.high < 0
+
+
+def mean_interval(values: Iterable[float | None], level: float = 0.95) -> Interval | None:
+    """The mean of the values that exist, with a t interval; None for fewer than two."""
+    defined = np.array([v for v in values if v is not None], dtype=np.float64)
+    if len(defined) < 2:
+        return None
+    mean = float(defined.mean())
+    half = t_quantile((1 + level) / 2, len(defined) - 1) * defined.std(ddof=1) / len(defined) ** 0.5
+    return Interval(mean, mean - float(half), mean + float(half))
+
+
+def difference(
+    first: Iterable[float | None], second: Iterable[float | None], level: float = 0.95
+) -> Interval | None:
+    """Mean of ``second`` minus mean of ``first``, with a Welch t interval (unequal
+    variances); None unless both have at least two values."""
+    a = np.array([v for v in first if v is not None], dtype=np.float64)
+    b = np.array([v for v in second if v is not None], dtype=np.float64)
+    if len(a) < 2 or len(b) < 2:
+        return None
+    value = float(b.mean() - a.mean())
+    va, vb = a.var(ddof=1) / len(a), b.var(ddof=1) / len(b)
+    if va + vb == 0:
+        return Interval(value, value, value)
+    df = (va + vb) ** 2 / (va**2 / (len(a) - 1) + vb**2 / (len(b) - 1))
+    half = t_quantile((1 + level) / 2, float(df)) * math.sqrt(va + vb)
+    return Interval(value, value - half, value + half)
 
 
 def key_metrics(

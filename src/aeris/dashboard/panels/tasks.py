@@ -97,6 +97,7 @@ class SuiteScores(SuitePanel):
                     name=label(group, members),
                     marker_color=series_colour(index),
                     text=[_fmt(m) for m in means],
+                    insidetextanchor="start",  # at the base, clear of the error bars
                     error_y={
                         "type": "data",
                         "array": [s.std if s else 0 for s in stats],

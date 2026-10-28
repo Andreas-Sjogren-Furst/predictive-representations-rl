@@ -51,4 +51,5 @@ family and evidence protocol.
 In the dashboard, the multi-run panels (training curves, suite scores) have a **Group runs by**
 option that offers the experiment name and every setting that differs between the selected runs:
 curves become mean ± std bands, bars get ± std error bars, and the *Group summary* panel shows the
-same table as `aeris runs summary`. The *Compare runs* layout uses them.
+same numbers as `aeris runs summary`, plus each group's difference from the first with a 95%
+interval. The *Compare runs* layout uses them; see [the dashboard](../dashboard.md#comparing-runs).

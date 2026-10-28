@@ -101,13 +101,18 @@ BUILT_IN = (
         name="Compare runs",
         panels=(
             PanelSpec(panel="group_summary", width=2),
-            PanelSpec(panel="run_comparison", width=2),
+            PanelSpec(panel="seed_dots", width=2),
+            PanelSpec(panel="suite_scores", width=2, options={"group_by": "name"}),
             PanelSpec(
                 panel="loss_curves",
-                options={"metrics": ["fb_loss"], "smoothing": 5, "group_by": "name"},
+                width=2,
+                options={
+                    "metrics": ["fb_loss", "fb_regularization", "target_policy_entropy"],
+                    "smoothing": 5,
+                    "group_by": "name",
+                },
             ),
-            PanelSpec(panel="evaluation"),
-            PanelSpec(panel="suite_scores", width=2),
+            PanelSpec(panel="run_comparison", width=2),
         ),
     ),
 )

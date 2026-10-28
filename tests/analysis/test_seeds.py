@@ -1,6 +1,13 @@
 import pytest
 
-from aeris.analysis.seeds import key_metrics, summarize, summarize_groups
+from aeris.analysis.seeds import (
+    difference,
+    key_metrics,
+    mean_interval,
+    summarize,
+    summarize_groups,
+    t_quantile,
+)
 from aeris.domain import EvaluationRecord, MetricValue
 from conftest import synthetic_suite_report, write_four_rooms_run
 
@@ -10,6 +17,25 @@ def test_summarize_ignores_missing_values():
     assert summarize([1.0, None, 3.0]).std == pytest.approx(2**0.5)
     assert summarize([0.5]).std == 0.0 and summarize([0.5]).n == 1
     assert summarize([None]) is None
+
+
+def test_t_quantiles_match_the_tables():
+    assert t_quantile(0.975, 1) == pytest.approx(12.706, abs=1e-3)
+    assert t_quantile(0.975, 4) == pytest.approx(2.776, abs=1e-3)
+    assert t_quantile(0.975, 7.3) == pytest.approx(2.345, abs=1e-3)  # fractional, as Welch gives
+    assert t_quantile(0.975, 1e6) == pytest.approx(1.960, abs=1e-3)
+
+
+def test_intervals_of_means_and_differences():
+    interval = mean_interval([1.0, 2.0, 3.0, None])
+    assert interval.value == 2.0 and interval.high - 2.0 == pytest.approx(4.303 / 3**0.5, abs=1e-3)
+    assert mean_interval([1.0]) is None
+    # Welch: means 2 and 5, variances 1 and 4 over 3 runs each, df = 25/17 * 2 ≈ 2.94
+    gap = difference([1.0, 2.0, 3.0], [3.0, 5.0, 7.0])
+    assert gap.value == 3.0 and gap.excludes_zero is False  # 3.0 ± 3.18 · √(5/3)
+    assert gap.high - 3.0 == pytest.approx(t_quantile(0.975, 50 / 17) * (5 / 3) ** 0.5)
+    assert difference([1.0, 1.0], [2.0, 2.0]).excludes_zero
+    assert difference([1.0], [2.0, 3.0]) is None
 
 
 def test_key_metrics_read_evaluations_and_reports():

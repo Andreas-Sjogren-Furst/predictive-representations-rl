@@ -48,8 +48,9 @@ A panel whose data is missing says so and names the command that creates it, for
 | Panel | Scope | Shows |
 |---|---|---|
 | `run_summary` | one run | stat tiles: status and setup, the training goal's exact success and optimal actions (with the change since the initial policy), occupancy correlation, zero-shot score, zero-shot goal success and the weakest task family |
-| `run_comparison` | many runs | settings and key results of each selected run side by side |
-| `group_summary` | many runs | mean ± std across the seeds of each group, for every headline number |
+| `run_comparison` | many runs | settings and key results of each selected run, grouped by experiment and rounded; sampled success last |
+| `group_summary` | many runs | mean ± std across the seeds of each group for every headline number, exact results first, and each group's difference from the first with a 95% interval (✓ where it excludes 0) |
+| `seed_dots` | many runs | one row per chosen metric: every run as a dot coloured by its group, the group mean with its 95% interval, and the difference in the row title |
 | `loss_curves` | many runs | any logged training metric, one chart per metric (or overlaid), with optional smoothing; overlays runs, or groups as mean ± std bands |
 | `evaluation` | many runs | recorded evaluation metrics per checkpoint |
 | `policy_map` | one run | the training goal's saved policy (z = B(goal), initial or final): the action in every cell, suboptimal ones white on ink, over the outcome from each start (optimal, detour, late, trapped) |
@@ -132,6 +133,32 @@ nearly flat, so the action ranking there rests on small differences.
   principal component). The state structure lives in F and F·B (there, a state's nearest neighbour
   lies in the same room 94% of the time). Use B to check the regularizer, F and F·B to see what the
   representation learned.
+
+## Comparing runs
+
+The *Compare runs* layout asks whether groups of runs (by default, the seeds of each experiment)
+really differ. With a handful of seeds, mean ± std alone does not answer that, so `group_summary`
+and `seed_dots` give each group's difference from the first group with a 95% confidence interval
+(Welch's t, which does not assume equal variances), marked ✓ where the interval excludes 0. Rows
+run from exact results (the training goal over every start, the FB checkpoint diagnostics, the
+zero-shot suite per evidence protocol) to the sampled evaluation, which comes last because it
+rests on a few episodes. Below them: suite scores per family, training curves and every run's
+row. A group without a report shows *no report*, and the caption names the command that creates
+it.
+
+On the 40k-update Four Rooms sweep (5 oracle and 5 random seeds), random − oracle:
+
+| Metric | Difference | 95% interval |
+|---|---|---|
+| training goal, all-start success | −0.149 | [−0.257, −0.042] ✓ |
+| training goal, optimal actions | −0.066 | [−0.100, −0.032] ✓ |
+| zero-shot, all tasks (`dataset_rewards`) | −0.008 | [−0.017, +0.002] |
+| zero-shot, distance (`all_states`) | −0.066 | [−0.109, −0.023] ✓ |
+| sampled success (20 episodes) | −0.280 | [−0.460, −0.100] ✓ |
+
+The random dataset hurts the training goal's policy (z = B(goal)) but makes no measurable
+difference to the zero-shot suite overall (z inferred from rewards); distance tasks under
+`all_states` are the exception. The sampled evaluation puts the gap at about twice the exact one.
 
 ## Adding a panel
 

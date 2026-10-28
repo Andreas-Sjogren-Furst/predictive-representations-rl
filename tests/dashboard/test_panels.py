@@ -120,6 +120,7 @@ def test_multi_run_panels_overlay_runs(four_rooms_run):
     assert [trace.name for trace in curves.data] == ["a · fb_loss", "b · fb_loss"]
     table = PANELS["run_comparison"].render(runs, {})
     assert [row["run"] for row in table.rows] == ["a", "b"]
+    assert "sampled success" in table.rows[0] and "final success" not in table.rows[0]
 
 
 def test_saved_options_fall_back_when_no_longer_valid(four_rooms_run):
@@ -262,7 +263,36 @@ def test_grouped_panels_aggregate_seeds(four_rooms_run):
     bars = PANELS["suite_scores"].render(runs, {"protocol": "dataset_rewards", "group_by": "name"})
     assert len(bars.data) == 1 and bars.data[0].error_y.visible
     table = PANELS["group_summary"].render(runs, {"group_by": "name"})
-    assert "(n=3)" in table.rows[0]["name=fb_demo (n=3)"]
+    assert "±" in table.rows[0]["name=fb_demo (n=3)"]
+
+
+def test_group_summary_gives_the_difference_with_an_interval(four_rooms_run):
+    runs = []
+    for origin in ("oracle", "random"):
+        for seed in range(3):
+            run = four_rooms_run(f"{origin}{seed}", dataset_settings={"origin": origin})
+            run.write_report(synthetic_suite_report(seed=seed))
+            runs.append(populate(run))
+    options = {"group_by": "dataset.origin"}
+    table = PANELS["group_summary"].render(runs, options)
+    row = next(r for r in table.rows if r["metric"] == "all tasks")
+    assert row["section"] == "zero-shot · dataset_rewards"
+    assert "dataset.origin=random − dataset.origin=oracle" in row
+    assert table.rows[-1]["section"].startswith("sampled evaluation")  # exact results first
+    assert "Missing analyses: four-rooms for 6 of 6 runs" in table.caption
+
+    panel = PANELS["seed_dots"]
+    resolved = panel.resolve_options(runs, options)
+    assert resolved["metrics"] == (
+        "zero-shot · dataset_rewards · all tasks",
+        "zero-shot · all_states · all tasks",
+    )
+    figure = panel.render(runs, resolved)
+    assert "dataset.origin=random − dataset.origin=oracle" in figure.layout.annotations[0].text
+    assert [t.name for t in figure.data if t.showlegend] == [
+        "dataset.origin=oracle",
+        "dataset.origin=random",
+    ]
 
 
 def test_behaviour_panels_roll_out_the_saved_suite_actions(four_rooms_run):
