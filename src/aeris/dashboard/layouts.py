@@ -44,13 +44,16 @@ BUILT_IN = (
     Layout(
         name="Run overview",
         panels=(
-            PanelSpec(panel="loss_curves", options={"metrics": ["fb_loss", "fb_regularization"]}),
-            PanelSpec(panel="evaluation"),
+            PanelSpec(panel="run_summary", width=2),
             PanelSpec(panel="policy_map"),
-            PanelSpec(panel="trajectory"),
-            PanelSpec(panel="goal_scores_map"),
+            PanelSpec(panel="rollout"),
+            PanelSpec(
+                panel="loss_curves",
+                options={"metrics": ["fb_loss", "fb_regularization", "target_policy_entropy"]},
+            ),
+            PanelSpec(panel="suite_scores"),
             PanelSpec(panel="report"),
-            PanelSpec(panel="run_overview", width=2),
+            PanelSpec(panel="run_overview"),
         ),
     ),
     Layout(

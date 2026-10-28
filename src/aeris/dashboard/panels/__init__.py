@@ -11,6 +11,7 @@ from aeris.dashboard.panels.representations import (
     RepresentationSimilarity,
     ValueMap,
 )
+from aeris.dashboard.panels.summary import RunSummary
 from aeris.dashboard.panels.tables import GroupSummaryTable, ReportView, RunComparison, RunOverview
 from aeris.dashboard.panels.tasks import (
     GoalScoresMap,
@@ -24,6 +25,7 @@ from aeris.dashboard.panels.training import LossCurves
 PANELS: dict[str, Panel] = {
     panel.name: panel
     for panel in (
+        RunSummary(),
         RunComparison(),
         GroupSummaryTable(),
         LossCurves(),

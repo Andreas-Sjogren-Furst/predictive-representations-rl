@@ -2,8 +2,8 @@
 
 A panel never imports Streamlit and never reads files. It declares its options
 as data (``Choice``, ``MultiChoice``, ``Number``, ``Toggle``) so any shell can
-draw the right widgets, and it returns a Plotly figure, a ``Table`` or a
-``Message``. A new visualization is a new ``Panel`` subclass registered in
+draw the right widgets, and it returns a Plotly figure, a ``Table``, a row of
+``Stats`` or a ``Message``. A new visualization is a new ``Panel`` subclass registered in
 ``panels/__init__.py``; no shell code changes.
 """
 
@@ -54,10 +54,43 @@ class Toggle:
 
 Option = Choice | MultiChoice | Number | Toggle
 
+# Series colours in fixed order (never cycled): slot n always means the n-th series.
+CATEGORICAL = (
+    "#2a78d6",  # blue
+    "#eb6834",  # orange
+    "#1baf7a",  # aqua
+    "#eda100",  # yellow
+    "#e87ba4",  # magenta
+    "#008300",  # green
+    "#6250d6",  # violet
+    "#e34948",  # red
+)
+OVERFLOW = "#a3a29c"  # every series past the eighth
+
+
+def series_colour(index: int) -> str:
+    return CATEGORICAL[index] if index < len(CATEGORICAL) else OVERFLOW
+
 
 @dataclass(frozen=True)
 class Table:
     rows: Sequence[Mapping[str, Any]]
+    caption: str = ""
+
+
+@dataclass(frozen=True)
+class Stat:
+    """One headline number: a label, the value as text, and an optional muted line."""
+
+    label: str
+    value: str
+    detail: str = ""
+    delta: str | None = None  # a change, signed, e.g. "+76 pts vs initial"
+
+
+@dataclass(frozen=True)
+class Stats:
+    stats: Sequence[Stat]
     caption: str = ""
 
 
@@ -67,7 +100,7 @@ class Message:
     kind: Literal["info", "warning"] = "info"
 
 
-Output: TypeAlias = Union[go.Figure, Table, Message]  # noqa: UP007 (go.Figure is untyped)
+Output: TypeAlias = Union[go.Figure, Table, Stats, Message]  # noqa: UP007 (go.Figure is untyped)
 
 
 @dataclass(frozen=True)

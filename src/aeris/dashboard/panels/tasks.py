@@ -13,7 +13,16 @@ import plotly.graph_objects as go
 
 from aeris.analysis.seeds import summarize
 from aeris.dashboard.data import RunData
-from aeris.dashboard.panels.base import STYLE, Choice, Message, Option, Output, Panel, Table
+from aeris.dashboard.panels.base import (
+    STYLE,
+    Choice,
+    Message,
+    Option,
+    Output,
+    Panel,
+    Table,
+    series_colour,
+)
 from aeris.dashboard.panels.grid import ARROWS, ENV, add_goal, grid_figure
 from aeris.dashboard.panels.grouping import group_choice, group_runs, label
 from aeris.domain.reports import ZeroShotSuiteReport
@@ -69,7 +78,7 @@ class SuiteScores(SuitePanel):
         protocol = options["protocol"]
         fig = go.Figure()
         lowest = 0.0
-        for group, members in group_runs(runs, options["group_by"]).items():
+        for index, (group, members) in enumerate(group_runs(runs, options["group_by"]).items()):
             reports = [r for run in members if (r := _suite(run)) is not None]
             families = list(dict.fromkeys(f for r in reports for f in r.mean_score))
             stats = [
@@ -82,6 +91,7 @@ class SuiteScores(SuitePanel):
                     x=families,
                     y=means,
                     name=label(group, members),
+                    marker_color=series_colour(index),
                     text=[_fmt(m) for m in means],
                     error_y={
                         "type": "data",

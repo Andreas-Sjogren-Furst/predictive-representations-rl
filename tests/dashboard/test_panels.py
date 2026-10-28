@@ -12,7 +12,8 @@ from aeris.analysis.goal_policy import build_goal_oracle
 from aeris.dashboard.data import load_run, run_stamp
 from aeris.dashboard.layouts import BUILT_IN, Layout, PanelSpec, load_layouts, save_layout
 from aeris.dashboard.panels import PANELS
-from aeris.dashboard.panels.base import Message, MultiChoice, Table
+from aeris.dashboard.panels.base import Message, MultiChoice, Stats, Table
+from aeris.dashboard.panels.tables import SECTIONS, display
 from aeris.dashboard.panels.training import smooth
 from aeris.domain import (
     EvaluationRecord,
@@ -98,13 +99,14 @@ def test_every_panel_renders_or_explains_what_is_missing(name, four_rooms_run):
         assert "aeris analysis" in problem  # missing reports name the command to create them
         return
     output = panel.render([run], panel.resolve_options([run], {}))
-    assert isinstance(output, (Table, Message)) or output.data
+    assert isinstance(output, (Table, Stats, Message)) or output.data
 
 
 def test_map_panels_check_optimality_and_animate(four_rooms_run):
     run = populate(four_rooms_run())
     policy = PANELS["policy_map"].render([run], PANELS["policy_map"].resolve_options([run], {}))
-    assert "optimal choices 100%" in policy.layout.title.text
+    assert "optimal choices 100% · optimal 100% · detour 0%" in policy.layout.title.text
+    assert not any(trace.name == "suboptimal action" and trace.showlegend for trace in policy.data)
     animation = PANELS["trajectory"].render([run], PANELS["trajectory"].resolve_options([run], {}))
     assert len(animation.frames) == 3
 
@@ -213,6 +215,7 @@ def test_suite_panels_render_from_the_report(name, four_rooms_run):
         {"family": "room"},
         {"task": "room_top_left", "colour": "start score", "compare": True, "start": "9,9"},
         {"task": "random_dense_0", "colour": "visits"},
+        {"actions": True},
     ):
         output = panel.render([data], panel.resolve_options([data], overrides))
         assert isinstance(output, Table) or output.data
@@ -238,7 +241,7 @@ def test_grouped_panels_aggregate_seeds(four_rooms_run):
         runs.append(populate(run))
     assert group_choice(runs).choices == ("run", "name")  # nothing else differs between them
     curves = PANELS["loss_curves"].render(
-        runs, {"metrics": ("fb_loss",), "smoothing": 1, "group_by": "name"}
+        runs, {"metrics": ("fb_loss",), "smoothing": 1, "separate": True, "group_by": "name"}
     )
     assert [t.name for t in curves.data] == [
         "name=fb_demo (n=3) · fb_loss",
@@ -291,3 +294,70 @@ def test_behaviour_panels_roll_out_the_saved_suite_actions(four_rooms_run):
         [data], fates.resolve_options([data], {"task": "reach_1_1", "protocol": "all_states"})
     )
     assert "optimal 99% · detour 0% · late 0% · trapped 1%" in figure.layout.title.text
+
+
+def test_policy_map_marks_suboptimal_actions_and_trapped_starts(four_rooms_run):
+    run = four_rooms_run()
+    populate(run)
+    dynamics = FourRooms().tabular_dynamics()
+    oracle = build_goal_oracle(dynamics, (9, 9), gamma=0.99)
+    actions = oracle.optimal_policy().copy()
+    actions[dynamics.index_of((9, 8))] = 2  # left, away from the goal next door
+    run.write_policy_snapshot("final", PolicySnapshot(states=oracle.states, actions=actions))
+    data = load_run(run.root)
+    panel = PANELS["policy_map"]
+    figure = panel.render([data], panel.resolve_options([data], {}))
+    title = figure.layout.title.text
+    assert "optimal choices 99%" in title and "trapped 0%" not in title
+    marked = next(t for t in figure.data if t.name == "suboptimal action")
+    assert list(zip(marked.y, marked.x, strict=True)) == [(9, 8)]
+
+
+def test_run_summary_shows_headlines_and_names_missing_analyses(four_rooms_run):
+    run = four_rooms_run()
+    data = populate(run)
+    summary = PANELS["run_summary"].render([data], {})
+    assert [stat.label for stat in summary.stats] == ["Status", "Setup"]
+    assert "aeris analysis zero-shot" in summary.caption
+    run.write_report(synthetic_suite_report())
+    summary = PANELS["run_summary"].render([load_run(run.root)], {})
+    labels = [stat.label for stat in summary.stats]
+    assert {"Zero-shot score", "Zero-shot goal success", "Weakest family"} <= set(labels)
+    assert "zero-shot" not in summary.caption
+
+
+def test_settings_table_groups_sections_and_hides_provenance(four_rooms_run):
+    data = populate(four_rooms_run())
+    panel = PANELS["run_overview"]
+    table = panel.render([data], panel.resolve_options([data], {}))
+    sections = [row["section"] for row in table.rows]
+    assert "provenance" not in sections and sections == sorted(sections, key=SECTIONS.index)
+    everything = panel.render([data], {"sections": SECTIONS})
+    assert {row["section"] for row in everything.rows} >= {"run", "agent"}
+
+
+def test_report_numbers_are_rounded():
+    assert [display(v) for v in (0.6716417910447762, 200.0, 0.0018377, 0.0, True)] == [
+        "0.672",
+        "200",
+        "0.00184",
+        "0",
+        "True",
+    ]
+
+
+def test_loss_curves_draw_one_chart_per_metric(four_rooms_run):
+    data = populate(four_rooms_run())
+    panel = PANELS["loss_curves"]
+    figure = panel.render(
+        [data], panel.resolve_options([data], {"metrics": ["fb_loss", "fb_regularization"]})
+    )
+    assert [trace.yaxis for trace in figure.data] == ["y", "y2"]
+    assert not any(trace.showlegend for trace in figure.data)  # one run: titles name the metrics
+    overlaid = panel.render(
+        [data],
+        panel.resolve_options(
+            [data], {"metrics": ["fb_loss", "fb_regularization"], "separate": False}
+        ),
+    )
+    assert [trace.name for trace in overlaid.data] == ["fb_loss", "fb_regularization"]

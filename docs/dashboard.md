@@ -30,6 +30,12 @@ heavy computation.
 - **Live refresh** (sidebar toggle): re-reads runs every few seconds, to follow a training run.
 - **Runs tab:** every run under the runs directory with its status, agent and seed.
 
+The *Run overview* layout answers "did this run work, and where does it fail?" from the top down:
+the summary tiles, the training goal's policy map next to an exact rollout, training curves next to
+the zero-shot score per task family, then the analysis report and the run's settings. The policy map
+uses the goal's own z = B(goal), as during training; the rollout and the suite use z inferred from
+reward samples (`dataset_rewards` by default), so the two can differ.
+
 A panel whose data is missing says so and names the command that creates it, for example
 `aeris analysis zero-shot runs/…`.
 
@@ -37,21 +43,22 @@ A panel whose data is missing says so and names the command that creates it, for
 
 | Panel | Scope | Shows |
 |---|---|---|
+| `run_summary` | one run | stat tiles: status and setup, the training goal's exact success and optimal actions (with the change since the initial policy), occupancy correlation, zero-shot score, zero-shot goal success and the weakest task family |
 | `run_comparison` | many runs | settings and key results of each selected run side by side |
 | `group_summary` | many runs | mean ± std across the seeds of each group, for every headline number |
-| `loss_curves` | many runs | any logged training metric, with optional smoothing; overlays runs, or groups as mean ± std bands |
+| `loss_curves` | many runs | any logged training metric, one chart per metric (or overlaid), with optional smoothing; overlays runs, or groups as mean ± std bands |
 | `evaluation` | many runs | recorded evaluation metrics per checkpoint |
-| `policy_map` | one run | the saved action in each cell, coloured by exact optimality |
+| `policy_map` | one run | the training goal's saved policy (z = B(goal), initial or final): the action in every cell, suboptimal ones white on ink, over the outcome from each start (optimal, detour, late, trapped) |
 | `trajectory` | one run | an animated replay of a recorded evaluation episode |
 | `suite_scores` | many runs | zero-shot mean normalized score per task family; groups get ± std error bars |
 | `suite_distribution` | many runs | every task's zero-shot score, grouped by family |
 | `task_policy` | one run | one task's reward map with the action the agent inferred in every cell |
 | `goal_scores_map` | one run | zero-shot score or goal success per goal cell |
 | `rollout` | one run | the exact path of a zero-shot policy for any suite task from any start, animated, next to an optimal path; suboptimal actions marked |
-| `fate_map` | one run | every start cell coloured by where the zero-shot policy takes it (optimal, detour, late, trapped; or which loop), by start score, or by how many paths pass through |
+| `fate_map` | one run | every start cell coloured by where the zero-shot policy takes it (optimal, detour, late, trapped; or which loop), by start score, or by how many paths pass through; optionally with the action in every cell |
 | `suite_tasks` | one run | a table of every suite task's results |
-| `report` | one run | the numbers of any saved analysis report |
-| `run_overview` | one run | status, provenance and every recorded setting |
+| `report` | one run | the numbers of any saved analysis report, rounded |
+| `run_overview` | one run | every recorded setting by section (run, experiment, dataset, agent, training, …); provenance on request; ⚠ marks uncommitted code, errors and unfinished runs |
 | `projection` | one run | PCA (2-D or 3-D) of each state's representation, coloured by room, distance to goal, row, column or state density |
 | `similarity` | one run | similarity between every pair of states' representations, ordered by room |
 | `b_spectrum` | one run | singular values of B and its effective rank |
@@ -93,7 +100,7 @@ about 15 seconds and 8 MB. The built-in *Representations* layout shows all five 
 
 A panel is a small class in `src/aeris/dashboard/panels/`: it declares its options as data and turns
 typed run data (`RunData`: manifest, metrics, evaluations, trajectories, snapshots, reports) into a
-Plotly figure, a `Table` or a `Message`. It never imports Streamlit and never reads files
+Plotly figure, a `Table`, a row of `Stats` (headline tiles) or a `Message`. It never imports Streamlit and never reads files
 (`tests/test_architecture.py` enforces both), so panels would survive a move to another front end.
 
 ```python

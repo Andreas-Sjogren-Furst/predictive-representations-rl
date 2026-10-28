@@ -1,4 +1,4 @@
-"""Four Rooms maps: saved policies and an animated trajectory."""
+"""Four Rooms maps: the saved training-goal policy and a recorded trajectory."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 from aeris.analysis.goal_policy import build_goal_oracle
+from aeris.analysis.rollouts import policy_fates
 from aeris.dashboard.data import RunData
 from aeris.dashboard.panels.base import (
     STYLE,
@@ -21,8 +22,8 @@ from aeris.dashboard.panels.base import (
     Panel,
     Toggle,
 )
+from aeris.dashboard.panels.behaviour import add_actions, add_goal_outcomes, finish_map
 from aeris.dashboard.panels.grid import (
-    ARROWS,
     ENV,
     add_goal,
     add_playback,
@@ -30,8 +31,6 @@ from aeris.dashboard.panels.grid import (
     is_four_rooms,
     run_goal,
 )
-
-OPTIMAL, SUBOPTIMAL = "#16803c", "#d12626"
 
 
 def _require_four_rooms(runs: Sequence[RunData]) -> str | None:
@@ -45,13 +44,17 @@ class PolicyMap(Panel):
     name = "policy_map"
     title = "Policy map"
     scope = "run"
-    description = "The saved action in every cell, optionally checked against the exact optimum."
+    description = (
+        "The training goal's saved policy (z = B(goal)): the action in every cell, suboptimal "
+        "ones marked, over where it takes each start (optimal, detour, late, trapped)."
+    )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
         labels = tuple(runs[0].snapshots)
         return (
             Choice("snapshot", "Snapshot", labels, "final" if "final" in labels else None),
-            Toggle("check_optimal", "Colour by exact optimality", True),
+            Toggle("fates", "Colour cells by outcome", True),
+            Toggle("check_optimal", "Mark suboptimal actions", True),
         )
 
     def missing(self, runs: Sequence[RunData]) -> str | None:
@@ -62,36 +65,33 @@ class PolicyMap(Panel):
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         run, goal = runs[0], run_goal(runs[0])
         assert goal is not None
-        snapshot = run.snapshots[options["snapshot"]]
         dynamics = ENV.tabular_dynamics()
-        actions = snapshot.actions_for(dynamics.states)
+        actions = np.asarray(run.snapshots[options["snapshot"]].actions_for(dynamics.states))
+        oracle = build_goal_oracle(dynamics, goal, gamma=0.99)
+        optimal = oracle.optimal.optimal_actions
+        others = np.arange(len(actions)) != oracle.goal_index
+        chosen = optimal[np.arange(len(actions)), actions]
+        parts = [f"optimal choices {chosen[others].mean():.0%}"]
         fig = grid_figure()
-        title = f"{self.title} · {options['snapshot']}"
-        colours = ["#222222"] * len(actions)
-        if options["check_optimal"]:
-            oracle = build_goal_oracle(dynamics, goal, gamma=0.99)
-            optimal = oracle.optimal.optimal_actions[np.arange(len(actions)), actions]
-            colours = [OPTIMAL if ok else SUBOPTIMAL for ok in optimal]
-            fraction = optimal[np.arange(len(actions)) != oracle.goal_index].mean()
-            title += f" · optimal choices {fraction:.0%}"
-        cells = [
-            (s, a, c)
-            for s, a, c in zip(dynamics.states, actions, colours, strict=True)
-            if s != goal
-        ]
-        fig.add_trace(
-            go.Scatter(
-                x=[s[1] for s, _, _ in cells],
-                y=[s[0] for s, _, _ in cells],
-                mode="text",
-                text=[ARROWS[a] for _, a, _ in cells],
-                textfont={"size": 16, "color": [c for _, _, c in cells]},
-                hoverinfo="skip",
-                showlegend=False,
-            )
+        if options["fates"]:
+            fates = policy_fates(dynamics, actions, goal=oracle.goal_index)
+            parts.append(add_goal_outcomes(fig, dynamics, fates, max_steps=_max_steps(run)))
+        add_actions(
+            fig,
+            dynamics,
+            actions,
+            optimal if options["check_optimal"] else None,
+            skip=oracle.goal_index,
         )
         add_goal(fig, goal)
-        return STYLE.apply(fig, title)
+        title = f"{self.title} · {ENV.goal_task(goal).task_id} · {options['snapshot']}"
+        return finish_map(fig, title, " · ".join(parts))
+
+
+def _max_steps(run: RunData) -> int:
+    """The evaluation's step limit, which separates a detour from arriving late."""
+    limit = run.setting("evaluation.max_steps")
+    return limit if isinstance(limit, int) else ENV.max_episode_steps
 
 
 @dataclass(frozen=True)

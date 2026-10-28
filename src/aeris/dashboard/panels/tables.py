@@ -9,7 +9,7 @@ from typing import Any
 from aeris.agents.fb.reports import FBCheckpointReport
 from aeris.analysis.seeds import SeedStatistic, key_metrics, summarize
 from aeris.dashboard.data import RunData
-from aeris.dashboard.panels.base import Choice, Option, Output, Panel, Table
+from aeris.dashboard.panels.base import Choice, MultiChoice, Option, Output, Panel, Table
 from aeris.dashboard.panels.grouping import group_choice, group_runs, label
 from aeris.domain.reports import TabularPolicyReport, ZeroShotSuiteReport
 
@@ -29,18 +29,69 @@ def _scalars(data: Mapping[str, Any], prefix: str = "") -> dict[str, Any]:
     return flat
 
 
+def display(value: Any) -> str:
+    """A table cell: floats rounded to what can be read, everything else as text."""
+    if isinstance(value, float):
+        if 0.01 <= abs(value) < 1e6:
+            return f"{value:.3f}".rstrip("0").rstrip(".")
+        return f"{value:.3g}"
+    return str(value)
+
+
+# Settings by section, in reading order; provenance is hidden unless asked for.
+SECTIONS = (
+    "run",
+    "experiment",
+    "dataset",
+    "agent",
+    "training",
+    "environment",
+    "evaluation",
+    "provenance",
+)
+
+
+def _section(key: str) -> tuple[str, str]:
+    """A dotted manifest key as (section, short name): ``experiment.agent.settings.gamma``
+    is ("agent", "gamma")."""
+    parts = [p for p in key.split(".") if p != "settings"]
+    if parts[0] == "experiment" and len(parts) > 2:
+        return parts[1], ".".join(parts[2:])
+    if parts[0] in ("experiment", "provenance") and len(parts) > 1:
+        return parts[0], ".".join(parts[1:])
+    return "run", key
+
+
+def _flag(section: str, name: str, value: Any) -> str:
+    """Warn where a value means the run may not be what it claims to be."""
+    if (name == "git_dirty" and value is True) or (name == "error" and value is not None):
+        return f"⚠ {value}"
+    if name == "status" and value != "completed":
+        return f"⚠ {value}"
+    return display(value)
+
+
 @dataclass(frozen=True)
 class RunOverview(Panel):
     name = "run_overview"
-    title = "Run overview"
+    title = "Run settings"
     scope = "run"
-    description = "Status, provenance and every recorded setting of the run."
+    description = "Status, provenance and every recorded setting of the run, by section."
+
+    def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
+        shown = tuple(s for s in SECTIONS if s != "provenance")
+        return (MultiChoice("sections", "Sections", SECTIONS, shown),)
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         run = runs[0]
-        manifest = run.manifest.to_dict()
-        rows = [{"setting": "directory", "value": str(run.root)}]
-        rows += [{"setting": k, "value": str(v)} for k, v in _scalars(manifest).items()]
+        flat = {"directory": str(run.root), **_scalars(run.manifest.to_dict())}
+        rows = [
+            {"section": section, "setting": name, "value": _flag(section, name, value)}
+            for key, value in flat.items()
+            for section, name in [_section(key)]
+            if section in options["sections"]
+        ]
+        rows.sort(key=lambda row: SECTIONS.index(row["section"]))  # stable within a section
         return Table(rows, caption=self.title)
 
 
@@ -64,7 +115,7 @@ class ReportView(Panel):
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
         report = runs[0].reports[options["report"]]
-        rows = [{"field": k, "value": str(v)} for k, v in _scalars(report.to_dict()).items()]
+        rows = [{"field": k, "value": display(v)} for k, v in _scalars(report.to_dict()).items()]
         return Table(rows, caption=f"{options['report']} ({type(report).ARTIFACT_NAME})")
 
 

@@ -17,7 +17,16 @@ import streamlit as st
 from aeris.dashboard.data import RunData, load_run, run_stamp
 from aeris.dashboard.layouts import Layout, PanelSpec, load_layouts, save_layout
 from aeris.dashboard.panels import PANELS
-from aeris.dashboard.panels.base import Choice, Message, MultiChoice, Number, Option, Table, Toggle
+from aeris.dashboard.panels.base import (
+    Choice,
+    Message,
+    MultiChoice,
+    Number,
+    Option,
+    Stats,
+    Table,
+    Toggle,
+)
 from aeris.data.run_catalog import list_runs
 
 RUNS_ROOT = Path(os.environ.get("AERIS_RUNS_ROOT", "runs"))
@@ -60,6 +69,18 @@ def option_widget(option: Option, value: Any, key: str) -> Any:
     if isinstance(option, Toggle):
         return st.toggle(option.label, value=bool(value), key=key)
     raise TypeError(f"unsupported option {option!r}")
+
+
+def draw_stats(output: Stats, per_row: int = 4) -> None:
+    if output.caption:
+        st.caption(output.caption)
+    stats = list(output.stats)
+    for start in range(0, len(stats), per_row):
+        for column, stat in zip(st.columns(per_row), stats[start : start + per_row], strict=False):
+            with column:
+                st.metric(stat.label, stat.value, stat.delta)
+                if stat.detail:
+                    st.caption(stat.detail)
 
 
 def render_panel(
@@ -112,6 +133,8 @@ def render_panel(
                 if output.caption:
                     st.caption(output.caption)
                 st.dataframe(list(output.rows), width="stretch", hide_index=True)
+            elif isinstance(output, Stats):
+                draw_stats(output)
             elif isinstance(output, Message):
                 (st.warning if output.kind == "warning" else st.info)(output.text)
             else:

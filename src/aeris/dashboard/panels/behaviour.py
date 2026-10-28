@@ -346,7 +346,8 @@ class FateMap(SuitePanel):
     scope = "run"
     description = (
         "Every start cell coloured by where the zero-shot policy takes it: to the goal "
-        "(optimally, with a detour, too late) or into a loop; or by start score or visits."
+        "(optimally, with a detour, too late) or into a loop; or by start score or visits. "
+        "Optionally shows the action in every cell."
     )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
@@ -354,6 +355,7 @@ class FateMap(SuitePanel):
             _task_choice(runs),
             _protocol_choice(runs),
             Choice("colour", "Colour by", COLOURINGS, "outcome"),
+            Toggle("actions", "Show actions (instead of loops)", False),
         )
 
     def render(self, runs: Sequence[RunData], options: Mapping[str, Any]) -> Output:
@@ -361,7 +363,7 @@ class FateMap(SuitePanel):
         dynamics = b.dynamics
         fates = policy_fates(dynamics, b.actions, goal=b.goal)
         cells = [cell_label(s) for s in dynamics.states]
-        fate_text = [_fate(fates, dynamics, s, cell) for s, cell in enumerate(cells)]
+        fate_text = fate_texts(fates, dynamics)
         fig = grid_figure()
         colour = options["colour"]
         if colour == "start score":
@@ -398,50 +400,24 @@ class FateMap(SuitePanel):
                 f"busiest cell {cells[busiest]}: entered from {fates.visits[busiest]} other starts"
             )
         elif b.goal is not None:
-            outcomes = fates.goal_outcomes(max_steps=b.max_steps)
-            codes = np.array([GOAL_OUTCOMES.index(o) for o in outcomes], dtype=float)
-            text = [f"{t} · {o}" for t, o in zip(fate_text, outcomes, strict=True)]
-            _cell_heatmap(
-                fig,
-                dynamics,
-                codes,
-                text,
-                zmin=-0.5,
-                zmax=len(GOAL_OUTCOMES) - 0.5,
-                colorscale=_discrete_scale([STATUS[o] for o in GOAL_OUTCOMES]),
-                colorbar={
-                    "thickness": 12,
-                    "tickvals": list(range(len(GOAL_OUTCOMES))),
-                    "ticktext": list(GOAL_OUTCOMES),
-                },
-            )
-            others = outcomes[np.arange(len(outcomes)) != b.goal]
-            summary = " · ".join(
-                f"{o} {np.mean(others == o):.0%}" for o in (OPTIMAL, DETOUR, LATE, TRAPPED)
-            )
+            summary = add_goal_outcomes(fig, dynamics, fates, max_steps=b.max_steps)
         else:
             summary = self._cycle_outcomes(fig, b, fates, fate_text)
-        self._draw_cycles(fig, b, fates)
+        if options["actions"]:
+            solution = optimal_solution(dynamics, b.rewards, gamma=b.gamma)
+            add_actions(fig, dynamics, b.actions, solution.optimal_actions, skip=b.goal)
+        else:
+            add_loops(fig, dynamics, fates)
         if b.goal_cell is not None:
             add_goal(fig, b.goal_cell)
         title = f"{self.title} · {b.result.task.task_id} · {b.protocol}"
-        fig = STYLE.apply(fig, f"{title}<br><sup>{summary}</sup>")
-        fig.update_layout(
-            legend={"orientation": "h", "x": 0, "y": -0.06}
-        )  # clear of the colour bar
-        return fig
-
-    @staticmethod
-    def _ranked_cycles(fates: PolicyFates) -> list[int]:
-        """Cycles by the number of starts that end in them, most first."""
-        counts = np.bincount(fates.cycle_of[fates.cycle_of >= 0], minlength=len(fates.cycles))
-        return sorted(range(len(fates.cycles)), key=lambda c: (-counts[c], c))
+        return finish_map(fig, title, summary)
 
     def _cycle_outcomes(
         self, fig: go.Figure, b: _Behaviour, fates: PolicyFates, fate_text: Sequence[str]
     ) -> str:
         """Colour starts by the loop they end in (the three largest; the rest as 'other')."""
-        ranked = self._ranked_cycles(fates)
+        ranked = _ranked_cycles(fates)
         shown = ranked[: len(CYCLE_COLOURS)]
         code = {cycle: rank for rank, cycle in enumerate(shown)}
         other = len(shown)
@@ -484,21 +460,106 @@ class FateMap(SuitePanel):
             f" (an optimal policy's: {optimal:.2f})"
         )
 
-    def _draw_cycles(self, fig: go.Figure, b: _Behaviour, fates: PolicyFates) -> None:
-        """Each loop as a closed ink outline over its cells."""
-        for rank, c in enumerate(self._ranked_cycles(fates)):
-            cycle = list(fates.cycles[c])
-            x, y = _xy(b.dynamics, cycle + cycle[:1])
-            fig.add_trace(
-                go.Scatter(
-                    x=x,
-                    y=y,
-                    mode="lines+markers",
-                    line={"color": INK, "width": 2},
-                    marker={"size": 8, "color": INK, "line": {"width": 1.5, "color": "white"}},
-                    name="loop",
-                    legendgroup="loop",
-                    showlegend=rank == 0,
-                    hoverinfo="skip",
-                )
+
+def _ranked_cycles(fates: PolicyFates) -> list[int]:
+    """Cycles by the number of starts that end in them, most first."""
+    counts = np.bincount(fates.cycle_of[fates.cycle_of >= 0], minlength=len(fates.cycles))
+    return sorted(range(len(fates.cycles)), key=lambda c: (-counts[c], c))
+
+
+def fate_texts(fates: PolicyFates, dynamics: TabularDynamics) -> list[str]:
+    """Hover text for every start state: where the policy takes it."""
+    return [_fate(fates, dynamics, s, cell_label(cell)) for s, cell in enumerate(dynamics.states)]
+
+
+def add_goal_outcomes(
+    fig: go.Figure, dynamics: TabularDynamics, fates: PolicyFates, *, max_steps: int
+) -> str:
+    """Colour every start by its goal outcome; returns the share of each outcome."""
+    outcomes = fates.goal_outcomes(max_steps=max_steps)
+    codes = np.array([GOAL_OUTCOMES.index(o) for o in outcomes], dtype=float)
+    text = [f"{t} · {o}" for t, o in zip(fate_texts(fates, dynamics), outcomes, strict=True)]
+    _cell_heatmap(
+        fig,
+        dynamics,
+        codes,
+        text,
+        zmin=-0.5,
+        zmax=len(GOAL_OUTCOMES) - 0.5,
+        colorscale=_discrete_scale([STATUS[o] for o in GOAL_OUTCOMES]),
+        colorbar={
+            "thickness": 12,
+            "tickvals": list(range(len(GOAL_OUTCOMES))),
+            "ticktext": list(GOAL_OUTCOMES),
+        },
+    )
+    others = outcomes[np.arange(len(outcomes)) != fates.goal]
+    return " · ".join(f"{o} {np.mean(others == o):.0%}" for o in (OPTIMAL, DETOUR, LATE, TRAPPED))
+
+
+def add_actions(
+    fig: go.Figure,
+    dynamics: TabularDynamics,
+    actions: np.ndarray,
+    optimal: np.ndarray | None,
+    *,
+    skip: int | None = None,
+) -> None:
+    """The action in every cell as an ink arrow; a suboptimal one white on an ink disc.
+
+    ``optimal`` is the [state, action] mask of optimal actions, or None to mark nothing.
+    """
+    states = [s for s in range(dynamics.num_states) if s != skip]
+    wrong = [s for s in states if optimal is not None and not optimal[s, actions[s]]]
+    x, y = _xy(dynamics, wrong)
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode="markers",
+            marker={"size": 19, "color": INK},
+            name="suboptimal action",
+            showlegend=bool(wrong),
+            hoverinfo="skip",
+        )
+    )
+    for group, colour in (([s for s in states if s not in wrong], INK), (wrong, "white")):
+        x, y = _xy(dynamics, group)
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="text",
+                text=[ARROWS[int(actions[s])] for s in group],
+                textfont={"size": 15, "color": colour},
+                showlegend=False,
+                hoverinfo="skip",
             )
+        )
+
+
+def finish_map(fig: go.Figure, title: str, summary: str) -> go.Figure:
+    """Title with a summary line, and the legend below the grid, clear of the colour bar."""
+    fig = STYLE.apply(fig, f"{title}<br><sup>{summary}</sup>")
+    fig.update_layout(legend={"orientation": "h", "x": 0, "y": -0.06})
+    return fig
+
+
+def add_loops(fig: go.Figure, dynamics: TabularDynamics, fates: PolicyFates) -> None:
+    """Each loop as a closed ink outline over its cells."""
+    for rank, c in enumerate(_ranked_cycles(fates)):
+        cycle = list(fates.cycles[c])
+        x, y = _xy(dynamics, cycle + cycle[:1])
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="lines+markers",
+                line={"color": INK, "width": 2},
+                marker={"size": 8, "color": INK, "line": {"width": 1.5, "color": "white"}},
+                name="loop",
+                legendgroup="loop",
+                showlegend=rank == 0,
+                hoverinfo="skip",
+            )
+        )

@@ -8,9 +8,20 @@ from typing import Any
 
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from aeris.dashboard.data import RunData
-from aeris.dashboard.panels.base import STYLE, Message, MultiChoice, Number, Option, Output, Panel
+from aeris.dashboard.panels.base import (
+    STYLE,
+    Message,
+    MultiChoice,
+    Number,
+    Option,
+    Output,
+    Panel,
+    Toggle,
+    series_colour,
+)
 from aeris.dashboard.panels.grouping import group_choice, group_runs, label, mean_and_std
 
 
@@ -48,7 +59,10 @@ class LossCurves(Panel):
     name = "loss_curves"
     title = "Training curves"
     scope = "runs"
-    description = "Any logged metric over updates; overlays runs or groups (mean ± std band)."
+    description = (
+        "Any logged metric over updates, one chart per metric; overlays runs or groups "
+        "(mean ± std band)."
+    )
 
     def options(self, runs: Sequence[RunData]) -> tuple[Option, ...]:
         names = _metric_names(runs)
@@ -56,6 +70,7 @@ class LossCurves(Panel):
         return (
             MultiChoice("metrics", "Metrics", names, default),
             Number("smoothing", "Smoothing (logged points)", 1, minimum=1, maximum=200),
+            Toggle("separate", "One chart per metric", True),
             group_choice(runs),
         )
 
@@ -66,33 +81,61 @@ class LossCurves(Panel):
         metrics = options["metrics"]
         if not metrics:
             return Message("Choose at least one metric.")
-        fig = go.Figure()
+        separate = options["separate"] and len(metrics) > 1
+        fig = make_subplots(
+            rows=len(metrics) if separate else 1,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.06,
+            subplot_titles=metrics if separate else None,
+        )
         groups = group_runs(runs, options["group_by"])
-        for group, members in groups.items():
-            for metric in metrics:
+        single = len(groups) == 1 and len(next(iter(groups.values()))) == 1
+        for row, metric in enumerate(metrics, start=1):
+            for index, (group, members) in enumerate(groups.items()):
                 series = [s for run in members if (s := _series(run, metric, options["smoothing"]))]
                 if not series:
                     continue
-                name = (
-                    metric
-                    if len(groups) == 1 and len(members) == 1
-                    else f"{label(group, members)} · {metric}"
-                )
+                if separate:  # a group keeps its colour on every chart; one legend entry
+                    name, colour = label(group, members), series_colour(index)
+                    legend = row == 1 and not single
+                else:
+                    trace = (row - 1) * len(groups) + index
+                    name = metric if single else f"{label(group, members)} · {metric}"
+                    colour, legend = series_colour(trace), True
+                place = {"row": row if separate else 1, "col": 1}
                 steps, mean, std = mean_and_std(series)
-                line = go.Scatter(x=steps, y=mean, mode="lines", name=name)
-                fig.add_trace(line)
+                fig.add_trace(
+                    go.Scatter(
+                        x=steps,
+                        y=mean,
+                        mode="lines",
+                        name=name,
+                        legendgroup=name,
+                        showlegend=legend,
+                        line={"color": colour, "width": 2},
+                    ),
+                    **place,
+                )
                 if len(series) > 1:
                     fig.add_trace(
                         go.Scatter(
                             x=np.concatenate([steps, steps[::-1]]),
                             y=np.concatenate([mean + std, (mean - std)[::-1]]),
                             fill="toself",
+                            fillcolor=colour,
                             opacity=0.2,
                             line={"width": 0},
                             hoverinfo="skip",
                             name=f"{name} ± std",
+                            legendgroup=name,
                             showlegend=False,
-                        )
+                        ),
+                        **place,
                     )
-        fig.update_xaxes(title="gradient updates")
-        return STYLE.apply(fig, self.title)
+        rows = len(metrics) if separate else 1
+        fig.update_xaxes(title="gradient updates", row=rows, col=1)
+        fig = STYLE.apply(fig, self.title)
+        if separate:
+            fig.update_layout(height=max(STYLE.height, 60 + 170 * rows))
+        return fig

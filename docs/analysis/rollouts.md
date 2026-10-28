@@ -9,10 +9,10 @@ state (`TabularDynamics` in, plain records out).
 ```python
 from aeris.analysis.rollouts import policy_fates, rollout
 
-path = rollout(dynamics, actions, start, goal=goal)   # stops at the goal or the first repeat
+path = rollout(dynamics, actions, start, goal=goal)  # stops at the goal or the first repeat
 path.states, path.actions, path.goal_step, path.cycle
-fates = policy_fates(dynamics, actions, goal=goal)    # every start at once
-fates.goal_outcomes(max_steps=60)                     # at goal / optimal / detour / late / trapped
+fates = policy_fates(dynamics, actions, goal=goal)  # every start at once
+fates.goal_outcomes(max_steps=60)  # at goal / optimal / detour / late / trapped
 ```
 
 - **`rollout`** follows the policy until it enters the goal (goal tasks) or reaches a state it has
