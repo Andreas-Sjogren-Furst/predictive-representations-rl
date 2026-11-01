@@ -115,6 +115,20 @@ BUILT_IN = (
             PanelSpec(panel="run_comparison", width=2),
         ),
     ),
+    Layout(
+        name="Network",
+        shared={"layer": None, "condition": None},  # one layer and one z for every panel
+        panels=(
+            PanelSpec(panel="layer_ranks", width=2),
+            PanelSpec(panel="probe_matrix", width=2),
+            PanelSpec(panel="feature_pca"),
+            PanelSpec(panel="probe_map"),
+            PanelSpec(panel="feature_clusters"),
+            PanelSpec(panel="state_sensitivity"),
+            PanelSpec(panel="z_sensitivity", width=2),
+            PanelSpec(panel="layer_alignment", width=2),
+        ),
+    ),
 )
 
 

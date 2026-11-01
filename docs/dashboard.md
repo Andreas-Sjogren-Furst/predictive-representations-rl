@@ -22,8 +22,9 @@ heavy computation.
   page can put two runs' policy maps side by side.
 - **Edit layout** (sidebar toggle): add panels, change their width, move them up or down, remove
   them, set the number of columns, and **Save** the layout under a name. Layouts are saved as JSON in
-  `dashboards/` (commit them to keep figure setups reproducible). Five layouts are built in:
-  *Run overview*, *Zero-shot suite*, *Behaviour*, *Representations* and *Compare runs*; a saved
+  `dashboards/` (commit them to keep figure setups reproducible). Six layouts are built in:
+  *Run overview*, *Zero-shot suite*, *Behaviour*, *Representations*, *Compare runs* and
+  *Network*; a saved
   layout with the same name replaces a built-in one.
 - **Shared pickers:** a layout can share options between its panels. *Behaviour* shares the task
   and the evidence protocol: one picker above the grid sets them for every panel, so a whole page
@@ -69,6 +70,14 @@ A panel whose data is missing says so and names the command that creates it, for
 | `b_spectrum` | one run | singular values of centred B and its effective rank, out of the at most S − 1 directions S states can span |
 | `occupancy_maps` | one run | learned F(s0, a, z)·B, the exact occupancy density m/ρ and their difference, for a chosen goal, start cell and first action; the title gives the learned share of the exact occupancy mass |
 | `value_map` | one run | learned F·z next to the exact value of the same objective (the goal's occupancy over ρ), under FB's own policy or an optimal one, on one colour scale |
+| `layer_ranks` | one run | effective rank and srank of every layer of every network, and how fast each layer's variance accumulates over principal components |
+| `feature_pca` | one run | PCA (2-D or 3-D) of any layer, coloured by any state label |
+| `probe_matrix` | one run | held-out probe score of every target (geometry, task, dynamics) from every layer: linear, kernel or nearest-neighbour |
+| `probe_map` | one run | one probe's held-out prediction on the grid, next to the truth |
+| `feature_clusters` | one run | k-means or Ward clusters of any layer on the grid, with their agreement with the rooms |
+| `state_sensitivity` | one run | how far a layer moves with one step, on every edge between neighbouring cells |
+| `z_sensitivity` | one run | actions, exact score and layer change as z = B(goal) is rescaled or moved toward another goal's z |
+| `layer_alignment` | many runs | one layer compared between runs: linear CKA, or held-out linear predictability |
 | `action_values` | one run | for z = B(goal): where the best learned action is not optimal, and the learned, same-policy and optimal value of every action in one cell (by default the costliest mistake) |
 
 ## Behaviour panels
@@ -133,6 +142,58 @@ nearly flat, so the action ranking there rests on small differences.
   principal component). The state structure lives in F and F·B (there, a state's nearest neighbour
   lies in the same room 94% of the time). Use B to check the regularizer, F and F·B to see what the
   representation learned.
+
+## Network panels
+
+The *Network* layout looks inside the networks, layer by layer. Its panels read
+`analysis/network_features_v1.npz`, created once per run with
+
+```bash
+aeris analysis features runs/<name>             # --goal ROW,COL to change the reference goal
+```
+
+It saves the activations of every layer of every state: B's layers once, and F's layers and Q
+for 27 values of z. Those are the reference z = B(goal) for the run's training goal, that
+direction at 12 lengths from 0.01 to 50, z inferred from the run's data for the goal and four
+other tasks, and 9 steps on a straight line to the farthest goal's B. It takes about a minute
+(most of it loading torch) and 5 MB. Any agent that implements the `FeatureExtractor` contract
+(it names its layers and returns their activations) can be exported the same way; the panels
+know nothing about FB.
+
+The page shares one layer and one z between its panels. Things to know when reading it:
+
+- **Probes are scored on held-out states.** With 68 states and up to 400 units, a probe fits
+  any target on its own training data, so every score is out of 5 folds, with the probe's
+  regularization chosen inside each training fold. R² below 0 means worse than predicting the
+  mean; accuracy is shown next to the best constant guess. Units are not rescaled one by one:
+  probes see the layer's own geometry.
+- **Probe targets** come in three groups: geometry (row, column, room, next to a wall), the
+  reference goal's task (distance, V\*, the optimal action, any of several counting as right),
+  and dynamics (the next position under each action, the occupancy of a random walk and of an
+  optimal policy).
+- **Rank** counts directions across states, so no layer can exceed 67 (68 states − 1).
+- **Across runs**, linear CKA compares geometry up to rotation and scale; linear predictability
+  asks whether a linear map from one run's layer predicts another's on held-out states, which
+  also allows any invertible linear map, the freedom FB's F and B have.
+
+On the 40k-update sweep (oracle seed 0), the export shows:
+
+- **B's output barely encodes where a state is.** A linear probe recovers the row with held-out
+  R² 0.14 and the room with 74% accuracy, and B is not linearly predictable between seeds (R²
+  about 0). F's output encodes position, distance and occupancy almost perfectly (R² 0.98–1.00),
+  and its states cluster exactly by room (adjusted Rand 0.91).
+- **Longer z gives a worse policy for the same goal.** Along the direction of B(9,9), the
+  exact score on reach_9_9, as a mean over the 5 seeds, is:
+
+  | Data | \|z\| = 0.1 | \|z\| = 1 | z = B(9,9) (\|z\| ≈ 8–9) | \|z\| = 20 |
+  |---|---|---|---|---|
+  | oracle | 0.872 | 0.872 | 0.848 | 0.682 |
+  | random | 0.813 | 0.807 | 0.703 | 0.623 |
+
+  The inferred z (length about 0.12) sits in the good range. F.out itself moves less than 10%
+  over the whole sweep: small changes in F are enough to change the argmax of Q = F·z. The
+  long z = B(goal) costs the random runs more, so part of their deficit on the training goal
+  (the Compare runs section) comes from the length of z rather than the representation.
 
 ## Comparing runs
 

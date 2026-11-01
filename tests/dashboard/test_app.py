@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest
-from test_panels import add_representations, populate
+from test_panels import add_network_features, add_representations, populate
 
 from aeris.dashboard import APP_PATH
 from conftest import synthetic_suite_report
@@ -14,6 +14,7 @@ from conftest import synthetic_suite_report
 
 def test_app_renders_built_in_layouts_and_saves_edits(tmp_path, four_rooms_run, monkeypatch):
     add_representations(four_rooms_run("first"))
+    add_network_features(four_rooms_run("first"))
     four_rooms_run("first").write_report(synthetic_suite_report())
     populate(four_rooms_run("first"))
     populate(four_rooms_run("second"))
@@ -35,6 +36,12 @@ def test_app_renders_built_in_layouts_and_saves_edits(tmp_path, four_rooms_run, 
     assert len(charts) == 6, "every representation panel draws"
     assert all(chart.key.startswith("Representations|") for chart in charts)
     assert [box.label for box in at.selectbox].count("Goal (z = B(goal))") == 1  # shared
+
+    at.sidebar.selectbox[0].set_value("Network").run()
+    assert not at.exception
+    assert len(at.get("plotly_chart")) == 7, "every single-run network panel draws"
+    labels = [box.label for box in at.selectbox]
+    assert labels.count("Layer") == 1 and labels.count("z (for F and Q)") == 1  # shared
 
     at.sidebar.selectbox[0].set_value("Behaviour").run()
     assert not at.exception

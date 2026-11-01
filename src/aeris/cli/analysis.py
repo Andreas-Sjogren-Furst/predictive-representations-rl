@@ -123,6 +123,30 @@ def _score(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.3f}"
 
 
+@app.command("features")
+def features(
+    run: RunArg,
+    root: RootOpt = DEFAULT_ROOT,
+    goal: Annotated[
+        str | None,
+        typer.Option("--goal", help="Reference goal ROW,COL (default: the run's training goal)."),
+    ] = None,
+) -> None:
+    """Save every layer's activations for the dashboard's network panels."""
+    from aeris.workflows.four_rooms import export_network_features
+
+    with cli_errors():
+        store = resolve_run(run, root=root)
+        result = export_network_features(store, goal=_parse_goal(goal) if goal else None)
+    typer.echo(f"Network features: {result.run_id} / {result.checkpoint}")
+    typer.echo(
+        f"  {len(result.states)} states, {len(result.layers)} layers, "
+        f"{len(result.conditions)} conditions"
+    )
+    typer.echo(f"Artifact: {store.arrays_path(result.ARTIFACT_NAME)}")
+    typer.echo("View: aeris dashboard (layout 'Network')")
+
+
 @app.command("representations")
 def representations(
     run: RunArg,

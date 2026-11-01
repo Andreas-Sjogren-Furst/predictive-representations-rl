@@ -27,6 +27,7 @@ The contracts use `typing.Protocol` for structural compatibility. The runtime `i
 | | `Checkpointable` | Supply/restore opaque learning state | Picking checkpoint paths or writing files |
 | | `TaskConditioner[EvidenceT]` | Infer a policy condition from authorized evidence | Obtaining hidden evaluation rewards; updating weights |
 | | `ZeroShotAgent[EvidenceT]` | `Agent` + `TaskConditioner`: what zero-shot evaluation needs | Learning during evaluation |
+| | `FeatureExtractor` | Name its layers in network order (and which depend on the condition); return every layer's activations for a batch of observations, plus a `Q` layer if it acts greedily | Changing weights or state; reading files |
 | `contracts/environment.py` | `Environment` | `reset`, `step`, `close` | Choosing agent actions or computing analysis metrics |
 | | `TabularModel` | Expose `spec`, exact `tabular_dynamics()`, `observation_for(state)` and the environment's goal-task format, for oracle analyses only | Being used by learning code |
 | | `TransitionTable` | Enumerated states and an integer successor table (implemented by `environments.tabular.TabularDynamics`) | Rewards or task definitions (see `TabularMDP`) |

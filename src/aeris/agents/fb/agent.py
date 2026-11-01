@@ -220,6 +220,28 @@ class DiscreteFBAgent:
             raise ValueError("reward evidence must be finite")
         return (self.backward_network(obs) * rewards.unsqueeze(-1)).mean(dim=0).detach()
 
+    def feature_layers(self) -> dict[str, bool]:
+        """B's layers (state only), then F's and Q (conditioned on z); see FeatureExtractor."""
+        b = {f"B.{name}": False for name in ("fc1", "fc2", "fc3", "out")}
+        return {**b, **{f"F.{name}": True for name in ("fc1", "fc2", "fc3", "out")}, "Q": True}
+
+    @torch.no_grad()
+    def extract_features(
+        self, observations: Any, condition: Any | None = None
+    ) -> dict[str, np.ndarray]:
+        """Every layer of B, and of F and Q for ``condition``, one row per observation."""
+        obs = self._observations(observations)
+        layers = {
+            f"B.{name}": value for name, value in self.backward_network.activations(obs).items()
+        }
+        if condition is not None:
+            z = self._conditions(condition, batch_size=len(obs))
+            forward = self.forward_network.activations(obs, z)
+            layers.update({f"F.{name}": value for name, value in forward.items()})
+            d, a = self.config.representation_dim, self.config.num_actions
+            layers["Q"] = self._q_values(forward["out"].reshape(-1, d, a), z)
+        return {name: value.cpu().numpy() for name, value in layers.items()}
+
     @torch.no_grad()
     def forward_features(self, observations: Any, actions: Any, condition: Any) -> torch.Tensor:
         """Forward vectors of the given actions, shape [B, d]."""

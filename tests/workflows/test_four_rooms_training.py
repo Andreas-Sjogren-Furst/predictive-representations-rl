@@ -1,5 +1,6 @@
 import json
 
+import numpy as np
 import pytest
 from typer.testing import CliRunner
 
@@ -157,3 +158,41 @@ def test_representations_export_for_any_dataset(tmp_path, dataset):
         assert saved.state_density.std() == pytest.approx(0.0, abs=1e-7)
     full = export_fb_representations(outcome.run)
     assert len(full.goals) == len(full.states) == 68
+
+
+def test_network_features_export_every_layer_and_render(tmp_path):
+    from aeris.analysis.network_features import INTERPOLATION, LENGTH, REFERENCE, TASK
+    from aeris.dashboard.data import load_run
+    from aeris.dashboard.panels import PANELS
+    from aeris.dashboard.panels.base import Message
+    from aeris.workflows.four_rooms import FEATURE_LENGTHS, export_network_features
+
+    outcome = train_four_rooms_fb(FourRoomsFBTraining(output=tmp_path / "run", **TINY))
+    features = export_network_features(outcome.run)
+    kinds = [c.kind for c in features.conditions]
+    assert kinds[0] == REFERENCE and kinds.count(LENGTH) == len(FEATURE_LENGTHS)
+    assert kinds.count(TASK) == 5 and kinds.count(INTERPOLATION) == 9
+    goal = features.conditions[0]
+    assert features.conditions[1].length == pytest.approx(FEATURE_LENGTHS[0])
+    lengths = np.linalg.norm(features.condition_vectors, axis=1)
+    assert lengths[0] == pytest.approx(goal.length, rel=1e-5)
+    assert features.layer("F.out", 3).shape == (68, 100 * 4)
+    assert features.layer("B.out").shape == (68, 100)
+    run = load_run(outcome.run.root)
+    assert run.features is not None and run.features.conditions == features.conditions
+    for name in (
+        "layer_ranks",
+        "feature_pca",
+        "probe_matrix",
+        "probe_map",
+        "feature_clusters",
+        "state_sensitivity",
+        "z_sensitivity",
+    ):
+        panel = PANELS[name]
+        assert panel.missing([run]) is None
+        output = panel.render([run], panel.resolve_options([run], {}))
+        assert not isinstance(output, Message) and output.data, name
+    result = runner.invoke(app, ["analysis", "features", str(outcome.run.root)])
+    assert result.exit_code == 0, result.output
+    assert "68 states, 9 layers, 27 conditions" in result.output

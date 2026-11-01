@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 
-from conftest import synthetic_representations, synthetic_suite_report
+from conftest import synthetic_network_features, synthetic_representations, synthetic_suite_report
 
 pytest.importorskip("plotly")
 from aeris.analysis.goal_policy import build_goal_oracle
@@ -31,6 +31,11 @@ def add_representations(run, seed=0):
     states = FourRooms().positions
     reps = synthetic_representations(states=states, goals=((9, 9), (1, 1)), d=8, a=4, seed=seed)
     run.write_arrays(reps.ARTIFACT_NAME, *reps.to_arrays())
+
+
+def add_network_features(run, seed=0):
+    features = synthetic_network_features(seed=seed)
+    run.write_arrays(features.ARTIFACT_NAME, *features.to_arrays())
 
 
 def populate(run):
@@ -521,3 +526,41 @@ def test_representation_panels_compare_like_with_like(four_rooms_run):
     bars = [t for t in actions.data if t.type == "bar"]
     assert [b.name for b in bars] == ["learned F·z", "exact, same policy", "exact, optimal"]
     assert all(max(b.y) == pytest.approx(1.0) for b in bars)  # relative to each best action
+
+
+def test_network_panels_read_any_layer(four_rooms_run):
+    from aeris.dashboard.panels.base import Message
+
+    runs = []
+    for index in range(2):
+        run = four_rooms_run(f"net{index}")
+        add_network_features(run, seed=index)
+        runs.append(populate(run))
+    probes = PANELS["probe_matrix"]
+    matrix = probes.render(runs[:1], probes.resolve_options(runs[:1], {}))
+    rows = list(matrix.data[0].y)
+    assert rows[0] == "row · R²" and "room · accuracy (chance" in rows[2]
+    assert list(matrix.data[0].x) == ["B.out", "F.out", "Q"]
+    # B.out and F.out carry the cell's row and column, so a linear probe recovers them.
+    assert matrix.data[0].z[0][0] > 0.9 and matrix.data[0].z[0][1] > 0.5
+    clusters = PANELS["feature_clusters"].render(
+        runs[:1], PANELS["feature_clusters"].resolve_options(runs[:1], {"layer": "B.out"})
+    )
+    assert "agreement with rooms" in clusters.layout.title.text
+    sweep = PANELS["z_sensitivity"]
+    for choice in ("length of z", "interpolation"):
+        figure = sweep.render(runs[:1], sweep.resolve_options(runs[:1], {"sweep": choice}))
+        assert not isinstance(figure, Message)
+        scored = {t.name for t in figure.data if t.name.startswith("score on")}
+        expected = {"score on reach_9_9"} | (
+            {"score on reach_1_1"} if choice == "interpolation" else set()
+        )
+        assert scored == expected
+    alignment = PANELS["layer_alignment"]
+    for measure in ("linear CKA", "linear predictability (R²)"):
+        options = alignment.resolve_options(runs, {"layer": "B.out", "measure": measure})
+        heatmap = alignment.render(runs, options).data[0]
+        assert heatmap.z.shape == (2, 2)
+    assert isinstance(alignment.render(runs[:1], options), Message)
+    missing = PANELS["feature_pca"].missing([populate(four_rooms_run("bare"))])
+    assert missing is not None and "aeris analysis features" in missing

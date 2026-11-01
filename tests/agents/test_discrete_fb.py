@@ -195,3 +195,22 @@ def test_targets_move_only_every_target_update_period(period):
         a.update(b)
         moved = not torch.equal(target_weights(), before)
         assert moved == (step % period == 0), step
+
+
+def test_feature_extraction_matches_the_networks():
+    from aeris.contracts.agent import FeatureExtractor
+
+    a = agent()
+    assert isinstance(a, FeatureExtractor)
+    obs = np.random.default_rng(3).normal(size=(6, 4)).astype(np.float32)
+    z = np.random.default_rng(4).normal(size=5).astype(np.float32)
+    layers = a.feature_layers()
+    assert list(layers)[:4] == ["B.fc1", "B.fc2", "B.fc3", "B.out"] and layers["Q"]
+    unconditioned = a.extract_features(obs)
+    assert set(unconditioned) == {name for name, conditioned in layers.items() if not conditioned}
+    found = a.extract_features(obs, z)
+    assert set(found) == set(layers)
+    assert found["B.fc1"].shape == (6, 16) and found["F.out"].shape == (6, 5 * 3)
+    assert np.allclose(found["B.out"], a.backward_features(obs).numpy(), atol=1e-6)
+    assert np.allclose(found["Q"], a.action_values(obs, z).numpy(), atol=1e-5)
+    assert (found["B.fc2"] >= 0).all()  # after the ReLU

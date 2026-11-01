@@ -92,6 +92,47 @@ def synthetic_representations(
     )
 
 
+def synthetic_network_features(seed: int = 0):
+    """Well-formed network features of every Four Rooms state (no torch needed)."""
+    from aeris.analysis.network_features import (
+        INTERPOLATION,
+        LENGTH,
+        REFERENCE,
+        TASK,
+        FeatureCondition,
+        NetworkFeatures,
+    )
+    from aeris.environments import FourRooms
+
+    rng = np.random.default_rng(seed)
+    states = FourRooms().positions
+    conditions = (
+        FeatureCondition("B(9, 9)", REFERENCE, ("reach_9_9",), 5.0, 5.0),
+        FeatureCondition("short", LENGTH, ("reach_9_9",), 0.1, 0.1),
+        FeatureCondition("long", LENGTH, ("reach_9_9",), 10.0, 10.0),
+        FeatureCondition("inferred · reach_9_9", TASK, ("reach_9_9",), 0.1, 0.1),
+        FeatureCondition("start", INTERPOLATION, ("reach_9_9", "reach_1_1"), 5.0, 0.0),
+        FeatureCondition("end", INTERPOLATION, ("reach_9_9", "reach_1_1"), 5.0, 1.0),
+    )
+    s, c = len(states), len(conditions)
+    coordinates = np.array(states, dtype=np.float64)
+    return NetworkFeatures(
+        run_id="run",
+        checkpoint="checkpoint.pt",
+        gamma=0.99,
+        states=states,
+        layers=("B.out", "F.out", "Q"),
+        conditioned=frozenset({"F.out", "Q"}),
+        conditions=conditions,
+        condition_vectors=rng.normal(size=(c, 3)),
+        features={
+            "B.out": np.c_[coordinates, rng.normal(size=(s, 4))],
+            "F.out": rng.normal(size=(c, s, 8)) + np.c_[coordinates, np.zeros((s, 6))],
+            "Q": rng.normal(size=(c, s, 4)),
+        },
+    )
+
+
 def synthetic_suite_report(task_count_per_family: int = 2, seed: int = 0):
     """A well-formed ZeroShotSuiteReport over a few tasks of each four_rooms_v1 family."""
     from aeris.domain import SuiteOutcome, SuiteTaskResult, ZeroShotSuiteReport, task_family

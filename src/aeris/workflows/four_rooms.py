@@ -28,6 +28,7 @@ from aeris.workflows._runtime import use_single_cpu_thread
 
 if TYPE_CHECKING:
     from aeris.agents.fb.agent import DiscreteFBAgent
+    from aeris.analysis.network_features import NetworkFeatures
 
 # Run conventions shared by training (four_rooms_training.py) and the analyses here:
 # each evaluation label names a policy snapshot and the checkpoint id it was evaluated as.
@@ -311,6 +312,111 @@ def export_fb_representations(
     )
     run.store.write_arrays(FBRepresentations.ARTIFACT_NAME, *representations.to_arrays())
     return representations
+
+
+# The reference direction z = B(goal) rescaled to these lengths (|z|).
+FEATURE_LENGTHS = (0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
+# Suite tasks whose inferred z is exported, besides the run's own goal task.
+FEATURE_TASKS = ("room_top_left", "distance_9_9", "random_sparse_0", "random_dense_0")
+INTERPOLATION_STEPS = 9
+
+
+def export_network_features(run_ref: RunRef, *, goal: Position | None = None) -> NetworkFeatures:
+    """Save every layer's activations for every state under a set of conditions (needs torch).
+
+    Conditions: the reference z = B(goal) (by default the run's training goal);
+    that direction at the lengths in ``FEATURE_LENGTHS``; z inferred from the
+    run's own data (``dataset_rewards``) for the goal task and ``FEATURE_TASKS``;
+    and a straight line from B(goal) to B of the cell farthest from it. Saves
+    ``analysis/network_features_v1.npz``, which the dashboard's network panels read.
+    """
+    from aeris.analysis.network_features import (
+        INTERPOLATION,
+        LENGTH,
+        REFERENCE,
+        TASK,
+        FeatureCondition,
+        NetworkFeatures,
+    )
+    from aeris.contracts.agent import FeatureExtractor
+    from aeris.environments.four_rooms_tasks import task_suite
+
+    run = open_four_rooms_run(run_ref)
+    agent = _load_checkpoint(run)
+    if not isinstance(agent, FeatureExtractor):
+        raise ValueError("the agent does not expose its layers (FeatureExtractor)")
+    goal = run.goal if goal is None else goal
+    dynamics = run.env.tabular_dynamics()
+    observations = np.stack([run.env.observation_for(state) for state in dynamics.states])
+    dataset = _training_data(run, "network features (z inference)")
+    sample_states = [dynamics.index_of(run.env.position_of(obs)) for obs in dataset.observations]
+    suite = {task.task_id: task for task in task_suite("four_rooms_v1").tasks}
+    goal_task = run.env.goal_task(goal).task_id
+
+    def inferred(task_id: str) -> np.ndarray:
+        rewards = run.env.state_rewards(suite[task_id])
+        evidence = [
+            (obs, float(rewards[i]))
+            for obs, i in zip(dataset.observations, sample_states, strict=True)
+        ]
+        return agent.infer_condition(suite[task_id], evidence).cpu().numpy()
+
+    def b(position: Position) -> np.ndarray:
+        return agent.goal_condition(run.env.observation_for(position)).cpu().numpy()
+
+    reference = b(goal)
+    length = float(np.linalg.norm(reference))
+    distances = dynamics.shortest_path_lengths(dynamics.index_of(goal))
+    row, col = dynamics.states[int(np.argmax(distances))]
+    far = (int(row), int(col))
+    far_task = run.env.goal_task(far).task_id
+    conditions = [FeatureCondition(f"B{goal}", REFERENCE, (goal_task,), length, length)]
+    vectors = [reference]
+    for target in FEATURE_LENGTHS:
+        label = f"B{goal} direction, |z| = {target:g}"
+        conditions.append(FeatureCondition(label, LENGTH, (goal_task,), target, target))
+        vectors.append(reference * target / length)
+    for task_id in (goal_task, *(t for t in FEATURE_TASKS if t != goal_task)):
+        z = inferred(task_id)
+        size = float(np.linalg.norm(z))
+        conditions.append(FeatureCondition(f"inferred · {task_id}", TASK, (task_id,), size, size))
+        vectors.append(z)
+    other = b(far)
+    for t in np.linspace(0.0, 1.0, INTERPOLATION_STEPS):
+        z = (1 - t) * reference + t * other
+        conditions.append(
+            FeatureCondition(
+                f"B{goal} → B{far}, t = {t:g}",
+                INTERPOLATION,
+                (goal_task, far_task),
+                float(np.linalg.norm(z)),
+                float(t),
+            )
+        )
+        vectors.append(z)
+
+    layers = dict(agent.feature_layers())
+    base = agent.extract_features(observations)
+    per_condition = [agent.extract_features(observations, z) for z in vectors]
+    features = {
+        name: np.stack([found[name] for found in per_condition])
+        if conditioned
+        else np.asarray(base[name])
+        for name, conditioned in layers.items()
+    }
+    result = NetworkFeatures(
+        run_id=run.manifest.run_id,
+        checkpoint=run.store.checkpoint_path.name,
+        gamma=agent.config.gamma,
+        states=dynamics.states,
+        layers=tuple(layers),
+        conditioned=frozenset(name for name, conditioned in layers.items() if conditioned),
+        conditions=tuple(conditions),
+        condition_vectors=np.stack(vectors),
+        features=features,
+    )
+    run.store.write_arrays(NetworkFeatures.ARTIFACT_NAME, *result.to_arrays())
+    return result
 
 
 def _require_recorded_config(manifest: RunManifest, config: dict[str, Any]) -> None:

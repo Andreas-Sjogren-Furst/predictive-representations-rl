@@ -20,15 +20,23 @@ class ForwardMap(nn.Module):
         self.forward_out = nn.Linear(hidden_dim, representation_dim * num_actions)
 
     def forward(self, observations: torch.Tensor, conditions: torch.Tensor) -> torch.Tensor:
+        out = self.activations(observations, conditions)["out"]
+        return out.reshape(-1, self.representation_dim, self.num_actions)
+
+    def activations(
+        self, observations: torch.Tensor, conditions: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """Every layer's output, after its ReLU: fc1, fc2, fc3 and out ([B, d * A])."""
         d = self.representation_dim
         conditions = conditions / torch.sqrt(
             1 + torch.linalg.vector_norm(conditions, dim=-1, keepdim=True).square() / d
         )
         x = torch.cat((observations, conditions), dim=-1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        return self.forward_out(x).reshape(-1, d, self.num_actions)
+        layers = {"fc1": F.relu(self.fc1(x))}
+        layers["fc2"] = F.relu(self.fc2(layers["fc1"]))
+        layers["fc3"] = F.relu(self.fc3(layers["fc2"]))
+        layers["out"] = self.forward_out(layers["fc3"])
+        return layers
 
 
 class BackwardMap(nn.Module):
@@ -42,7 +50,12 @@ class BackwardMap(nn.Module):
         self.backward_out = nn.Linear(hidden_dim, representation_dim)
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        x = F.relu(self.fc1(observations))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        return self.backward_out(x)
+        return self.activations(observations)["out"]
+
+    def activations(self, observations: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Every layer's output, after its ReLU: fc1, fc2, fc3 and out ([B, d])."""
+        layers = {"fc1": F.relu(self.fc1(observations))}
+        layers["fc2"] = F.relu(self.fc2(layers["fc1"]))
+        layers["fc3"] = F.relu(self.fc3(layers["fc2"]))
+        layers["out"] = self.backward_out(layers["fc3"])
+        return layers

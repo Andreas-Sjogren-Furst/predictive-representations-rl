@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aeris.agents.fb.representations import FBRepresentations
+from aeris.analysis.network_features import NetworkFeatures
 from aeris.analysis.seeds import REPORT_TYPES
 from aeris.data.run_directory import RunDirectory
 from aeris.domain.artifacts import PolicySnapshot
@@ -30,6 +31,7 @@ class RunData:
     snapshots: Mapping[str, PolicySnapshot]
     reports: Mapping[str, AnalysisReport]  # keyed by the report class name
     representations: FBRepresentations | None = None
+    features: NetworkFeatures | None = None
 
     def report(self, report_type: type[AnalysisReport]) -> AnalysisReport | None:
         return self.reports.get(report_type.__name__)
@@ -62,6 +64,11 @@ def load_run(root: str | Path) -> RunData:
         representations=(
             FBRepresentations.from_arrays(*saved)
             if (saved := store.read_arrays(FBRepresentations.ARTIFACT_NAME)) is not None
+            else None
+        ),
+        features=(
+            NetworkFeatures.from_arrays(*saved)
+            if (saved := store.read_arrays(NetworkFeatures.ARTIFACT_NAME)) is not None
             else None
         ),
     )

@@ -34,3 +34,21 @@ class TaskConditioner(Protocol[EvidenceT]):
 @runtime_checkable
 class ZeroShotAgent(Agent, TaskConditioner[EvidenceT], Protocol[EvidenceT]):
     """An agent that acts on a condition it infers from task evidence, without learning."""
+
+
+@runtime_checkable
+class FeatureExtractor(Protocol):
+    """Internal activations of an agent's networks, for analysis.
+
+    ``feature_layers`` names every layer in network order (input side first) and
+    says whether it depends on the task condition. ``extract_features`` returns
+    one array [N, k] per layer, a row per observation; conditioned layers use
+    ``condition``, and unconditioned ones ignore it. A layer named ``"Q"``, if
+    present, holds the action values [N, A] the agent acts greedily on.
+    """
+
+    def feature_layers(self) -> Mapping[str, bool]: ...
+
+    def extract_features(
+        self, observations: Any, condition: Any | None = None
+    ) -> Mapping[str, Any]: ...
