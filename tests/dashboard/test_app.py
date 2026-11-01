@@ -43,6 +43,11 @@ def test_app_renders_built_in_layouts_and_saves_edits(tmp_path, four_rooms_run, 
     labels = [box.label for box in at.selectbox]
     assert labels.count("Layer") == 1 and labels.count("z (for F and Q)") == 1  # shared
 
+    at.sidebar.multiselect[0].set_value(["second"]).run()  # a run without network features
+    assert not at.exception
+    assert any("aeris analysis features" in box.value for box in at.info)
+    at.sidebar.multiselect[0].set_value(["first"]).run()
+
     at.sidebar.selectbox[0].set_value("Behaviour").run()
     assert not at.exception
     task = next(box for box in at.selectbox if box.label == "Task")  # one picker for the page

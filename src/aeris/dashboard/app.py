@@ -133,7 +133,9 @@ def render_panel(
         if panel.scope == "run":
             labels = [run.label for run in runs]
             saved = options.get(RUN_OPTION)
-            chosen: str = saved if isinstance(saved, str) and saved in labels else labels[0]
+            # By default, the first selected run that has this panel's data.
+            ready = next((run.label for run in runs if panel.missing([run]) is None), labels[0])
+            chosen: str = saved if isinstance(saved, str) and saved in labels else ready
             panel_runs = [runs[labels.index(chosen)]]
         else:
             panel_runs = list(runs)
@@ -144,12 +146,15 @@ def render_panel(
                 chosen = st.selectbox("Run", labels, index=labels.index(chosen), key=f"{key}|run")
                 options[RUN_OPTION] = chosen
                 panel_runs = [runs[labels.index(chosen)]]
-            resolved = panel.resolve_options(panel_runs, options)
-            for option in panel.options(panel_runs):
-                if option.key not in shared:
-                    options[option.key] = option_widget(
-                        option, resolved[option.key], f"{key}|{option.key}"
-                    )
+            # A panel's options may read the data it needs, so check for it first.
+            problem = panel.missing(panel_runs)
+            if problem is None:
+                resolved = panel.resolve_options(panel_runs, options)
+                for option in panel.options(panel_runs):
+                    if option.key not in shared:
+                        options[option.key] = option_widget(
+                            option, resolved[option.key], f"{key}|{option.key}"
+                        )
             if editing:
                 width = st.slider(
                     "Width (columns)",
@@ -159,7 +164,6 @@ def render_panel(
                     key=f"{key}|width",
                 )
                 spec = replace(spec, width=width)
-        problem = panel.missing(panel_runs)
         if problem:
             st.info(problem)
         else:
