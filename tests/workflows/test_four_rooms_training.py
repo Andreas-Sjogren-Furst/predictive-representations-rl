@@ -196,3 +196,31 @@ def test_network_features_export_every_layer_and_render(tmp_path):
     result = runner.invoke(app, ["analysis", "features", str(outcome.run.root)])
     assert result.exit_code == 0, result.output
     assert "68 states, 9 layers, 27 conditions" in result.output
+
+
+def test_dataset_scenarios_train_and_show_their_coverage(tmp_path):
+    from aeris.dashboard.data import load_run
+    from aeris.dashboard.panels import PANELS
+    from aeris.workflows.four_rooms import evaluate_task_suite
+
+    with pytest.raises(ValueError, match="needs the oracle dataset"):
+        FourRoomsFBTraining(output=tmp_path / "x", dataset="random", scenario="no_left")
+    with pytest.raises(ValueError, match="unknown dataset scenario"):
+        FourRoomsFBTraining(output=tmp_path / "x", scenario="nope")
+    outcome = train_four_rooms_fb(
+        FourRoomsFBTraining(output=tmp_path / "run", scenario="room_top_left", **TINY)
+    )
+    assert outcome.transition_count == 64
+    dataset = outcome.run.read_manifest().experiment.dataset
+    assert dataset.settings["scenario"] == "room_top_left"
+    assert list(dataset.settings["spec"]["rooms"]) == ["top-left"]
+    evaluate_task_suite(outcome.run)
+    run = load_run(outcome.run.root)
+    coverage = PANELS["dataset_coverage"]
+    figure = coverage.render([run], coverage.resolve_options([run], {}))
+    title = figure.layout.title.text
+    assert "oracle · room_top_left" in title and "16/68 start states" in title
+    assert "64/272 state-action pairs" in title and "goal 16/68" in title
+    assert {t.name for t in figure.data} >= {"only a next state", "goal"}
+    summary = PANELS["run_summary"].render([run], {})
+    assert "oracle data (room_top_left), 64" in summary.stats[1].detail

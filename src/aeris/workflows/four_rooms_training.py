@@ -29,6 +29,7 @@ from aeris.domain.results import EvaluationRecord, RunManifest
 from aeris.domain.task import TaskSpec
 from aeris.domain.validation import require_int
 from aeris.environments.four_rooms import FourRooms, Position
+from aeris.environments.four_rooms_datasets import oracle_dataset
 from aeris.experiments import (
     collect_transitions,
     evaluate_goal_policy,
@@ -53,7 +54,8 @@ class FourRoomsFBTraining:
 
     output: Path
     name: str = "fb_four_rooms"  # experiment (group) name shared by a configuration's seeds
-    dataset: DatasetOrigin = "oracle"  # full state-action coverage, or random collection
+    dataset: DatasetOrigin = "oracle"  # exact transitions, or random collection
+    scenario: str = "full"  # which exact dataset (environments.four_rooms_datasets.PRESETS)
     transitions: int = 5000  # collection size for the random dataset
     updates: int = 250
     batch_size: int = 128
@@ -71,6 +73,9 @@ class FourRoomsFBTraining:
             raise ValueError("name must be letters, digits, '_', '.' or '-' (it names directories)")
         if self.dataset not in get_args(DatasetOrigin):
             raise ValueError(f"dataset must be one of {get_args(DatasetOrigin)}")
+        oracle_dataset(self.scenario)  # raises for an unknown scenario
+        if self.dataset != "oracle" and self.scenario != "full":
+            raise ValueError("a dataset scenario needs the oracle dataset")
         for name in ("transitions", "updates", "batch_size", "episodes", "max_steps"):
             require_int(name, getattr(self, name), minimum=1)
         for name in ("seed", "trajectories"):
@@ -214,9 +219,42 @@ def train_four_rooms_fb(settings: FourRoomsFBTraining) -> TrainingOutcome:
     return TrainingOutcome(run, len(transitions), training.update_count, initial, final)
 
 
+@dataclass(frozen=True, slots=True)
+class ScenarioCoverage:
+    name: str
+    description: str
+    start_states: int
+    pairs: int
+    transitions: int
+    all_states: int
+    all_pairs: int
+
+
+def scenario_coverage() -> list[ScenarioCoverage]:
+    """Every exact dataset scenario with how much of Four Rooms it covers."""
+    from aeris.environments.four_rooms_datasets import PRESETS
+
+    env = FourRooms()
+    rows = []
+    for name, spec in PRESETS.items():
+        covered = spec.pairs(env)
+        rows.append(
+            ScenarioCoverage(
+                name=name,
+                description=spec.description,
+                start_states=len({state for state, _, _ in covered}),
+                pairs=len(covered),
+                transitions=sum(copies for _, _, copies in covered),
+                all_states=len(env.positions),
+                all_pairs=len(env.positions) * env.num_actions,
+            )
+        )
+    return rows
+
+
 def _dataset(env: FourRooms, settings: FourRoomsFBTraining) -> tuple[Transition, ...]:
     if settings.dataset == "oracle":
-        return tuple(env.all_transitions())
+        return oracle_dataset(settings.scenario).transitions(env)
     return collect_transitions(
         env,
         count=settings.transitions,
@@ -242,7 +280,19 @@ def _experiment_spec(
         ),
         dataset=ComponentSpec(
             name="fixed_grid_transitions",
-            settings={"origin": settings.dataset, "count": count, "sha256": fingerprint},
+            settings={
+                "origin": settings.dataset,
+                **(
+                    {
+                        "scenario": settings.scenario,
+                        "spec": oracle_dataset(settings.scenario).to_dict(),
+                    }
+                    if settings.dataset == "oracle"
+                    else {}
+                ),
+                "count": count,
+                "sha256": fingerprint,
+            },
         ),
         training=TrainingPlan(
             mode="offline",

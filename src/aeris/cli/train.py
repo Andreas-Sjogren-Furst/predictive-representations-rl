@@ -31,8 +31,12 @@ def four_rooms(
     ] = None,
     dataset: Annotated[
         Dataset,
-        typer.Option(help="Full state-action coverage ('oracle') or random collection."),
+        typer.Option(help="Exact transitions ('oracle', see --scenario) or random collection."),
     ] = Dataset.oracle,
+    scenario: Annotated[
+        str,
+        typer.Option(help="Which exact (oracle) dataset; see 'aeris datasets list'."),
+    ] = "full",
     transitions: Annotated[int, typer.Option(help="Random collection size.")] = 5000,
     updates: Annotated[int, typer.Option(help="Gradient updates.")] = 250,
     batch_size: Annotated[int, typer.Option(help="Transitions per update.")] = 128,
@@ -66,6 +70,7 @@ def four_rooms(
             output=output if output is not None else Path("runs") / run_name(name, seed),
             name=name,
             dataset=dataset.value,
+            scenario=scenario,
             transitions=transitions,
             updates=updates,
             batch_size=batch_size,

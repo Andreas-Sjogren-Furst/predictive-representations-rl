@@ -3,6 +3,7 @@
 from aeris.dashboard.panels.base import Panel
 from aeris.dashboard.panels.behaviour import FateMap, RolloutReplay, TaskPolicy
 from aeris.dashboard.panels.compare import SeedDots
+from aeris.dashboard.panels.coverage import DatasetCoverage
 from aeris.dashboard.panels.evaluation import EvaluationResults
 from aeris.dashboard.panels.maps import PolicyMap, TrajectoryAnimation
 from aeris.dashboard.panels.network import (
@@ -67,6 +68,7 @@ PANELS: dict[str, Panel] = {
         StateSensitivity(),
         ZSensitivity(),
         LayerAlignment(),
+        DatasetCoverage(),
     )
 }
 

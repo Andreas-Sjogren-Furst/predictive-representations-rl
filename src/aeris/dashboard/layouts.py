@@ -55,6 +55,7 @@ BUILT_IN = (
                 options={"metrics": ["fb_loss", "fb_regularization", "target_policy_entropy"]},
             ),
             PanelSpec(panel="suite_scores"),
+            PanelSpec(panel="dataset_coverage"),
             PanelSpec(panel="report"),
             PanelSpec(panel="run_overview"),
         ),
@@ -113,6 +114,7 @@ BUILT_IN = (
                 },
             ),
             PanelSpec(panel="run_comparison", width=2),
+            PanelSpec(panel="dataset_coverage"),
         ),
     ),
     Layout(

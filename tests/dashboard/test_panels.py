@@ -15,6 +15,7 @@ from aeris.dashboard.panels import PANELS
 from aeris.dashboard.panels.base import Message, MultiChoice, Stats, Table
 from aeris.dashboard.panels.tables import SECTIONS, display
 from aeris.dashboard.panels.training import smooth
+from aeris.data.artifacts import write_transitions_npz
 from aeris.domain import (
     EvaluationRecord,
     EvaluationTrajectory,
@@ -40,6 +41,8 @@ def add_network_features(run, seed=0):
 
 def populate(run):
     env = FourRooms()
+    if not run.dataset_path.exists():
+        write_transitions_npz(run.dataset_path, tuple(env.all_transitions()))
     for step in (10, 20, 30):
         run.write_training_metrics(
             TrainingMetricRecord(

@@ -2,7 +2,8 @@
 
 Each seed becomes one run directory ``<root>/<name>_seed<k>``, trained by
 ``aeris train four-rooms`` and then analyzed (tabular policy, zero-shot suite,
-representations, and the FB occupancy diagnostic for oracle data). Seeds run
+representations, network features, and the FB occupancy diagnostic when the
+data covers every state-action pair exactly once). Seeds run
 one after another locally, or in parallel as an LSF job array.
 """
 
@@ -49,8 +50,10 @@ class SeedSweep:
         return self.root / run_name(self.name, seed)
 
     @property
-    def oracle_data(self) -> bool:
-        return _option_value(self.train_args, "--dataset", default="oracle") == "oracle"
+    def full_coverage(self) -> bool:
+        """The original oracle dataset, which the FB occupancy diagnostic requires."""
+        oracle = _option_value(self.train_args, "--dataset", default="oracle") == "oracle"
+        return oracle and _option_value(self.train_args, "--scenario", default="full") == "full"
 
     def commands(self, seed: int) -> list[list[str]]:
         """Train one seed, then run every analysis that applies to it."""
@@ -72,8 +75,9 @@ class SeedSweep:
             [*aeris, "analysis", "four-rooms", run, "--no-plots"],
             [*aeris, "analysis", "zero-shot", run],
             [*aeris, "analysis", "representations", run],
+            [*aeris, "analysis", "features", run],
         ]
-        if self.oracle_data:
+        if self.full_coverage:
             steps.append([*aeris, "analysis", "fb-checkpoint", run, "--no-plots"])
         return steps
 

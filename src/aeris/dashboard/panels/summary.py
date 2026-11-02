@@ -85,7 +85,9 @@ class RunSummary(Panel):
         parts = []
         if (origin := run.setting("dataset.origin")) is not None:
             count = run.setting("dataset.count")
-            parts.append(f"{origin} data" + (f", {count:,}" if isinstance(count, int) else ""))
+            scenario = run.setting("dataset.scenario")
+            name = f"{origin} data" + (f" ({scenario})" if scenario not in (None, "full") else "")
+            parts.append(name + (f", {count:,}" if isinstance(count, int) else ""))
         if (dim := run.setting("agent.representation_dim")) is not None:
             parts.append(f"d = {dim}")
         return Stat("Setup", value, _join(*parts))

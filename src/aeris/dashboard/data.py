@@ -6,9 +6,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from aeris.agents.fb.representations import FBRepresentations
 from aeris.analysis.network_features import NetworkFeatures
 from aeris.analysis.seeds import REPORT_TYPES
+from aeris.data.artifacts import TransitionFile
 from aeris.data.run_directory import RunDirectory
 from aeris.domain.artifacts import PolicySnapshot
 from aeris.domain.reports import AnalysisReport
@@ -16,6 +19,27 @@ from aeris.domain.results import EvaluationRecord, RunManifest, TrainingMetricRe
 from aeris.domain.trajectory import EvaluationTrajectory
 
 SNAPSHOT_LABELS = ("initial", "final")
+
+
+@dataclass(frozen=True, eq=False)
+class DatasetSample:
+    """The run's training transitions, reduced to integers: for one-hot observations, the
+    index of the hot unit of each observation and next observation."""
+
+    observations: np.ndarray  # [N]
+    actions: np.ndarray  # [N]
+    next_observations: np.ndarray  # [N]
+
+    @classmethod
+    def read(cls, path: Path) -> DatasetSample | None:
+        if not path.is_file():
+            return None
+        data = TransitionFile(path)
+        return cls(
+            observations=np.asarray(data.observations.argmax(axis=1)),
+            actions=np.asarray(data.actions),
+            next_observations=np.asarray(data.next_observations.argmax(axis=1)),
+        )
 
 
 @dataclass(frozen=True)
@@ -32,6 +56,7 @@ class RunData:
     reports: Mapping[str, AnalysisReport]  # keyed by the report class name
     representations: FBRepresentations | None = None
     features: NetworkFeatures | None = None
+    dataset: DatasetSample | None = None
 
     def report(self, report_type: type[AnalysisReport]) -> AnalysisReport | None:
         return self.reports.get(report_type.__name__)
@@ -71,6 +96,7 @@ def load_run(root: str | Path) -> RunData:
             if (saved := store.read_arrays(NetworkFeatures.ARTIFACT_NAME)) is not None
             else None
         ),
+        dataset=DatasetSample.read(store.dataset_path),
     )
 
 

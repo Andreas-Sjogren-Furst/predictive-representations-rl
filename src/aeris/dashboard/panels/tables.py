@@ -230,6 +230,7 @@ class RunComparison(Panel):
                     "run": run.label,
                     "status": run.manifest.status,
                     "dataset": run.setting("dataset.origin"),
+                    "scenario": run.setting("dataset.scenario"),
                     "updates": _strategy(run, "updates"),
                     "hidden": run.setting("agent.hidden_dim"),
                     "d": run.setting("agent.representation_dim"),

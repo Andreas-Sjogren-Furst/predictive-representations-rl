@@ -28,6 +28,7 @@ def test_each_seed_trains_then_runs_the_applicable_analyses():
         ["analysis", "four-rooms"],
         ["analysis", "zero-shot"],
         ["analysis", "representations"],
+        ["analysis", "features"],
         ["analysis", "fb-checkpoint"],
     ]
     train = oracle.commands(1)[0]
@@ -35,7 +36,10 @@ def test_each_seed_trains_then_runs_the_applicable_analyses():
     assert ["--name", "fb", "--seed", "1", "--output", "runs/fb_seed1"] == train[5:11]
     assert train[-2:] == ["--updates", "10"]
     for args in (("--dataset", "random"), ("--dataset=random",)):
-        assert not SeedSweep("fb", (0,), args).oracle_data  # no fb-checkpoint for random data
+        assert not SeedSweep("fb", (0,), args).full_coverage  # no fb-checkpoint for random data
+    partial = SeedSweep("fb", (0,), ("--scenario", "room_top_left"))
+    assert not partial.full_coverage  # nor for an oracle dataset that leaves pairs out
+    assert ["analysis", "fb-checkpoint"] not in [c[3:5] for c in partial.commands(0)]
 
 
 def test_lsf_script_has_one_array_element_per_seed(tmp_path):
@@ -58,7 +62,7 @@ def test_local_runs_every_step_and_reports_failures(tmp_path):
     results = SeedSweep("fb", (0, 1), root=tmp_path, python=str(fake)).run_locally()
     assert results == {0: 0, 1: 3}
     calls = log.read_text().splitlines()
-    assert len(calls) == 5 + 1  # seed 0: train + 4 analyses; seed 1 stops at its failed training
+    assert len(calls) == 6 + 1  # seed 0: train + 5 analyses; seed 1 stops at its failed training
 
 
 def test_submit_saves_the_script_and_calls_bsub(tmp_path, monkeypatch):

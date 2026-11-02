@@ -49,7 +49,10 @@ def test_help_contains_only_implemented_commands():
     assert result.exit_code == 0, result.output
     assert "runs" in result.output
     assert "analysis" in result.output
-    assert "datasets" not in result.output
+    assert "datasets" in result.output
+    listing = runner.invoke(app, ["datasets", "list"])
+    assert listing.exit_code == 0
+    assert "room_top_left" in listing.output and "16/68" in listing.output
     assert runner.invoke(app, ["runs", "--help"]).exit_code == 0
     assert runner.invoke(app, ["analysis", "--help"]).exit_code == 0
 

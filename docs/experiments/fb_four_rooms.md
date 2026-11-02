@@ -15,6 +15,50 @@ To collect a *fixed* random replay dataset rather than using enumerated oracle
 transitions, add `--dataset random --transitions 5000`. The data collection
 process ends before offline training begins.
 
+## Dataset scenarios
+
+The oracle dataset can leave parts of the grid out, to test what FB learns from
+data that does not cover everything. `--scenario NAME` picks one of the exact
+datasets in `environments/four_rooms_datasets.py` (default `full`, every
+state-action pair once):
+
+```bash
+aeris datasets list                                             # every scenario and its coverage
+aeris train four-rooms --scenario rooms_no_bottom_right --updates 40000
+aeris sweep four-rooms --name fb_no_bottom_right --seeds 0-4 --lsf --scenario rooms_no_bottom_right --updates 40000
+```
+
+| Scenario | Start states | State-action pairs | Transitions | What it leaves out |
+|---|---|---|---|---|
+| `full` | 68 | 272 | 272 | nothing |
+| `room_top_left` | 16 | 64 | 64 | every room but the top-left |
+| `rooms_top` | 33 | 132 | 132 | the bottom rooms |
+| `rooms_no_bottom_right` | 52 | 208 | 208 | the bottom-right room, where the default goal (9,9) is |
+| `no_left` | 68 | 204 | 204 | the action ← |
+| `no_doorway_moves` | 64 | 248 | 248 | every move into or out of a doorway |
+| `skew_top_left` | 68 | 272 | 848 | nothing; the top-left room's pairs appear 10 times |
+| `rare_doorways` | 68 | 272 | 2,576 | nothing; every pair 10 times, the doorways' once |
+| `no_goal` | 67 | 268 | 268 | the goal (9,9) as a start |
+| `closed_doorway` | 67 | 268 | 268 | the doorway (8,5) between the bottom rooms as a start |
+| `holes_25` | 67 | 204 | 204 | a random 25% of the pairs (seeded) |
+| `holes_50` | 63 | 136 | 136 | a random 50% of the pairs (seeded) |
+
+Every transition is the true one, and each covered pair appears a fixed number of
+times, so a scenario changes only coverage, never adds noise. Moves out of the
+covered states are kept: a cell can be a next state without ever being a start
+(the doorways of `room_top_left`, the goal in `no_goal`). The manifest records
+the scenario and its full spec under `dataset.scenario` and `dataset.spec`, so
+`aeris runs summary --group-by dataset.scenario` and the dashboard's *Group runs
+by* compare scenarios directly. New scenarios are one `OracleDataset(...)` line
+in `PRESETS`: rooms, extra or dropped cells, dropped actions, moves to drop,
+copies per area and a random share of holes.
+
+On partial data, the zero-shot suite's `dataset_rewards` evidence only sees the
+covered states, so some tasks have no rewarded sample at all (the dashboard's
+`dataset_coverage` panel counts them per family). The FB occupancy diagnostic
+(`aeris analysis fb-checkpoint`) needs every pair exactly once, so it runs only
+for `full`.
+
 The script refuses to append into a nonempty output directory. Choose a new
 `--output` path per experiment. It records:
 
