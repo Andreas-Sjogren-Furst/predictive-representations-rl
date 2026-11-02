@@ -10,6 +10,7 @@ import numpy as np
 
 from aeris.agents.fb.representations import FBRepresentations
 from aeris.analysis.network_features import NetworkFeatures
+from aeris.analysis.policy_evaluation import PolicyEvaluation
 from aeris.analysis.seeds import REPORT_TYPES
 from aeris.data.artifacts import TransitionFile
 from aeris.data.run_directory import RunDirectory
@@ -57,6 +58,7 @@ class RunData:
     representations: FBRepresentations | None = None
     features: NetworkFeatures | None = None
     dataset: DatasetSample | None = None
+    policy_evaluation: PolicyEvaluation | None = None
 
     def report(self, report_type: type[AnalysisReport]) -> AnalysisReport | None:
         return self.reports.get(report_type.__name__)
@@ -97,6 +99,11 @@ def load_run(root: str | Path) -> RunData:
             else None
         ),
         dataset=DatasetSample.read(store.dataset_path),
+        policy_evaluation=(
+            PolicyEvaluation.from_arrays(*saved)
+            if (saved := store.read_arrays(PolicyEvaluation.ARTIFACT_NAME)) is not None
+            else None
+        ),
     )
 
 

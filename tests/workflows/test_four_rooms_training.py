@@ -8,6 +8,7 @@ torch = pytest.importorskip("torch")
 from aeris.agents.fb import DiscreteFBConfig
 from aeris.agents.fb.checkpoint import load_agent
 from aeris.cli.main import app
+from aeris.environments import FourRooms
 from aeris.workflows import four_rooms_training
 from aeris.workflows.four_rooms import diagnose_fb_checkpoint
 from aeris.workflows.four_rooms_training import FourRoomsFBTraining, train_four_rooms_fb
@@ -224,3 +225,33 @@ def test_dataset_scenarios_train_and_show_their_coverage(tmp_path):
     assert {t.name for t in figure.data} >= {"only a next state", "goal"}
     summary = PANELS["run_summary"].render([run], {})
     assert "oracle data (room_top_left), 64" in summary.stats[1].detail
+
+
+def test_policy_evaluation_learns_fixed_policies_on_the_run_data(tmp_path):
+    from aeris.agents.fb.checkpoint import load_agent
+    from aeris.workflows.four_rooms import export_policy_evaluation
+
+    outcome = train_four_rooms_fb(
+        FourRoomsFBTraining(output=tmp_path / "run", scenario="no_left", **TINY)
+    )
+    with pytest.raises(ValueError, match="unknown suite tasks: nope"):
+        export_policy_evaluation(outcome.run, tasks=["nope"], updates=2)
+    result = export_policy_evaluation(outcome.run, tasks=["reach_1_1", "room_top_left"], updates=6)
+    assert [p.label for p in result.policies] == [
+        "uniform random",
+        "optimal · reach_1_1",
+        "optimal · room_top_left",
+        "FB greedy · reach_1_1",
+        "FB greedy · room_top_left",
+    ]
+    assert result.forward.shape == (5, 68, 100, 4) and not result.covered[:, 2].any()
+    assert np.isfinite(result.losses[:3, :6]).all() and np.isnan(result.losses[3:]).all()
+    assert result.state_density.sum() == pytest.approx(1.0)
+    agent = load_agent(outcome.run.checkpoint_path)  # B is the run's own, untouched
+    observations = np.stack([FourRooms().observation_for(s) for s in result.states])
+    assert np.allclose(result.backward, agent.backward_features(observations).numpy(), atol=1e-6)
+    cli = runner.invoke(
+        app, ["analysis", "policy-evaluation", str(outcome.run.root), "--updates", "3"]
+    )
+    assert cli.exit_code == 0, cli.output
+    assert "optimal · reach_9_9: learned F^pi" in cli.output

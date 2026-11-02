@@ -133,6 +133,45 @@ def synthetic_network_features(seed: int = 0):
     )
 
 
+def synthetic_policy_evaluation(forward=None):
+    """A well-formed policy-evaluation artifact over every Four Rooms state (no torch)."""
+    from aeris.analysis.policy_evaluation import (
+        GREEDY_FB,
+        OPTIMAL,
+        UNIFORM,
+        EvaluatedPolicy,
+        PolicyEvaluation,
+    )
+    from aeris.analysis.task_scores import optimal_solution
+    from aeris.environments import FourRooms
+
+    dynamics = FourRooms().tabular_dynamics()
+    best = optimal_solution(dynamics, np.eye(68)[dynamics.index_of((9, 9))], gamma=0.99)
+    optimal = best.optimal_actions / best.optimal_actions.sum(axis=1, keepdims=True)
+    covered = np.ones((68, 4), dtype=bool)
+    covered[:, 2] = False  # as if the data never went left
+    return PolicyEvaluation(
+        run_id="run",
+        checkpoint="checkpoint.pt",
+        gamma=0.99,
+        updates=10,
+        states=dynamics.states,
+        policies=(
+            EvaluatedPolicy("uniform random", UNIFORM, None),
+            EvaluatedPolicy("optimal · reach_9_9", OPTIMAL, "reach_9_9"),
+            EvaluatedPolicy("FB greedy · reach_9_9", GREEDY_FB, "reach_9_9"),
+        ),
+        tables=np.stack([np.full((68, 4), 0.25), optimal, np.eye(4)[np.zeros(68, int)]]),
+        forward=np.random.default_rng(0).normal(size=(3, 68, 68, 4))
+        if forward is None
+        else forward,
+        backward=np.eye(68),
+        state_density=np.full(68, 1 / 68),
+        covered=covered,
+        losses=np.r_[np.ones((2, 5)), np.full((1, 5), np.nan)],
+    )
+
+
 def synthetic_suite_report(task_count_per_family: int = 2, seed: int = 0):
     """A well-formed ZeroShotSuiteReport over a few tasks of each four_rooms_v1 family."""
     from aeris.domain import SuiteOutcome, SuiteTaskResult, ZeroShotSuiteReport, task_family

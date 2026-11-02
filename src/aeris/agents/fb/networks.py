@@ -59,3 +59,24 @@ class BackwardMap(nn.Module):
         layers["fc3"] = F.relu(self.fc3(layers["fc2"]))
         layers["out"] = self.backward_out(layers["fc3"])
         return layers
+
+
+class PolicyForwardMap(nn.Module):
+    """observation -> [B, representation_dim, num_actions] for one fixed policy (no z)."""
+
+    def __init__(
+        self, observation_dim: int, representation_dim: int, num_actions: int, hidden_dim: int = 256
+    ):
+        super().__init__()
+        self.representation_dim = representation_dim
+        self.num_actions = num_actions
+        self.fc1 = nn.Linear(observation_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, hidden_dim)
+        self.forward_out = nn.Linear(hidden_dim, representation_dim * num_actions)
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        x = F.relu(self.fc1(observations))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        return self.forward_out(x).reshape(-1, self.representation_dim, self.num_actions)

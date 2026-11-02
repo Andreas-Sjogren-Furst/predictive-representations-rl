@@ -107,3 +107,10 @@ def test_cli_dry_run_and_guards(tmp_path):
     (tmp_path / "fb_seed0").mkdir()
     exists = runner.invoke(app, ["sweep", "four-rooms", "--name", "fb", "--root", str(tmp_path)])
     assert exists.exit_code == 1 and "already exist" in exists.output
+
+
+def test_policy_evaluation_is_an_optional_step():
+    plain = [c[3:5] for c in SeedSweep("fb", (0,)).commands(0)]
+    assert ["analysis", "policy-evaluation"] not in plain
+    with_step = [c[3:5] for c in SeedSweep("fb", (0,), policy_evaluation=True).commands(0)]
+    assert with_step[-1] == ["analysis", "policy-evaluation"]

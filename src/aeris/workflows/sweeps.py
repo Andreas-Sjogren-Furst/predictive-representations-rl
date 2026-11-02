@@ -45,6 +45,7 @@ class SeedSweep:
     train_args: tuple[str, ...] = ()  # extra options for `aeris train four-rooms`
     root: Path = Path("runs")
     python: str = sys.executable
+    policy_evaluation: bool = False  # also learn fixed policies' Q (adds minutes per seed)
 
     def run_dir(self, seed: int) -> Path:
         return self.root / run_name(self.name, seed)
@@ -79,6 +80,8 @@ class SeedSweep:
         ]
         if self.full_coverage:
             steps.append([*aeris, "analysis", "fb-checkpoint", run, "--no-plots"])
+        if self.policy_evaluation:
+            steps.append([*aeris, "analysis", "policy-evaluation", run])
         return steps
 
     def run_locally(self) -> dict[int, int]:

@@ -123,6 +123,34 @@ def _score(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.3f}"
 
 
+@app.command("policy-evaluation")
+def policy_evaluation(
+    run: RunArg,
+    root: RootOpt = DEFAULT_ROOT,
+    task: Annotated[
+        list[str] | None,
+        typer.Option("--task", help="Suite task; repeat for several (default: the run's goal)."),
+    ] = None,
+    updates: Annotated[int, typer.Option(help="Training updates per learned policy.")] = 20_000,
+    batch_size: Annotated[int, typer.Option(help="Transitions per update.")] = 128,
+    seed: Annotated[int, typer.Option(help="Seed for initialization and batches.")] = 0,
+) -> None:
+    """Learn Q of fixed policies on the run's data with its B frozen, for the policy panels."""
+    from aeris.workflows.four_rooms import export_policy_evaluation
+
+    with cli_errors():
+        store = resolve_run(run, root=root)
+        result = export_policy_evaluation(
+            store, tasks=task, updates=updates, batch_size=batch_size, seed=seed
+        )
+    typer.echo(f"Policy evaluation: {result.run_id} / {result.checkpoint}")
+    for policy in result.policies:
+        trained = "learned F^pi" if policy.kind != "fb greedy" else "the run's F(s, a, z)"
+        typer.echo(f"  {policy.label}: {trained}")
+    typer.echo(f"Artifact: {store.arrays_path(result.ARTIFACT_NAME)}")
+    typer.echo("View: aeris dashboard (layout 'Policy evaluation')")
+
+
 @app.command("features")
 def features(
     run: RunArg,

@@ -22,9 +22,9 @@ heavy computation.
   page can put two runs' policy maps side by side.
 - **Edit layout** (sidebar toggle): add panels, change their width, move them up or down, remove
   them, set the number of columns, and **Save** the layout under a name. Layouts are saved as JSON in
-  `dashboards/` (commit them to keep figure setups reproducible). Six layouts are built in:
-  *Run overview*, *Zero-shot suite*, *Behaviour*, *Representations*, *Compare runs* and
-  *Network*; a saved
+  `dashboards/` (commit them to keep figure setups reproducible). Seven layouts are built in:
+  *Run overview*, *Zero-shot suite*, *Behaviour*, *Representations*, *Compare runs*, *Network*
+  and *Policy evaluation*; a saved
   layout with the same name replaces a built-in one.
 - **Shared pickers:** a layout can share options between its panels. *Behaviour* shares the task
   and the evidence protocol: one picker above the grid sets them for every panel, so a whole page
@@ -80,6 +80,9 @@ A panel whose data is missing says so and names the command that creates it, for
 | `state_sensitivity` | one run | how far a layer moves with one step, on every edge between neighbouring cells |
 | `z_sensitivity` | one run | actions, exact score and layer change as z = B(goal) is rescaled or moved toward another goal's z |
 | `layer_alignment` | many runs | one layer compared between runs: linear CKA, or held-out linear predictability |
+| `policy_q_maps` | one run | V^π of a fixed policy on any task's reward: exact, from the dataset's transitions alone, and learned with the run's B frozen |
+| `policy_q_scatter` | one run | every (state, action)'s learned Q^π against the exact one, by action, hollow where the dataset lacks the pair |
+| `policy_q_training` | one run | the loss of each learned F^π along training |
 | `action_values` | one run | for z = B(goal): where the best learned action is not optimal, and the learned, same-policy and optimal value of every action in one cell (by default the costliest mistake) |
 
 ## Behaviour panels
@@ -196,6 +199,54 @@ On the 40k-update sweep (oracle seed 0), the export shows:
   over the whole sweep: small changes in F are enough to change the argmax of Q = F·z. The
   long z = B(goal) costs the random runs more, so part of their deficit on the training goal
   (the Compare runs section) comes from the length of z rather than the representation.
+
+## Policy evaluation
+
+FB's F(s, a, z) estimates the Q-values of its own greedy policy only. To see how well the networks
+can estimate the Q-values of *any* fixed policy from the offline data, the *Policy evaluation*
+layout reads `analysis/policy_evaluation_v1.npz`, created with
+
+```bash
+aeris analysis policy-evaluation runs/<name>              # the training goal's task
+aeris analysis policy-evaluation runs/<name> --task room_top_left --task reach_1_1 --updates 20000
+```
+
+For each run it evaluates three kinds of fixed policy:
+
+- **uniform random** and the **optimal policy** of each chosen task get a new forward network
+  F^π, trained on the run's own dataset with FB's loss. The run's B stays frozen, and the TD
+  target takes the fixed policy's action distribution at the next state instead of FB's own
+  policy. This takes about 2–3 minutes per policy at the default 20,000 updates;
+- **FB's own greedy policy** for each task's inferred z uses the run's F(s, a, z), untrained.
+
+F^π is reward-free, so the learned Q of any reward r is F^π(s, a) · z_r with z_r = E_ρ[r B], the
+same reading of the reward from the dataset's states as zero-shot inference. The page compares it
+with two references for the suite's objective, Q^π(s, a) = r(s) + γ V^π(next(s, a)):
+
+- **exact**, from the true dynamics;
+- **dataset only**, from the transitions the dataset contains. A pair is known only when the data
+  covers it and every move the policy can make from there stays inside covered pairs; the rest
+  is blank. On the full oracle dataset this equals the exact Q; on partial scenarios it shows how
+  much of Q^π the data determines at all (the uniform policy on `no_left`, which may always go
+  left, determines nothing).
+
+One policy and one reward are chosen at the top of the page. `aeris sweep four-rooms
+--policy-evaluation` adds the step to every seed.
+
+The maps panel also fits an **effective horizon**: the H whose truncated exact Q (the first H
+rewards only) best matches the learned one.
+
+On the 40k-update sweep, with reward reach_9_9 and 20,000 policy-evaluation updates, the learned
+Q has the right shape but is far too small: correlation 1.00 and 0.15 × exact for the optimal
+policy, 0.94 and 0.34 × exact for the uniform one. Both match the exact Q **truncated at 23–24
+steps** almost perfectly (mean error 0.01–0.2, against 1.1–79 for the full Q), on oracle and random
+data alike. That is the number of Bellman steps the slow target network allows. The target moves
+5% toward the online network every 40 updates, so 20,000 updates amount to about
+20,000 / 40 × 0.05 = 25 full refreshes, each propagating value one step. The same count explains
+the main FB runs' missing occupancy mass. 40,000 updates give about 50 refreshes, and the first
+50 steps hold 1 − 0.99⁵⁰ ≈ 40% of the discounted mass; the representation panels measure about
+36%. FB's own F(s, a, z) at the inferred z is a much weaker Q estimate for its own policy
+(correlation 0.29).
 
 ## Comparing runs
 

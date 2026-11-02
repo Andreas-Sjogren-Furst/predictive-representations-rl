@@ -24,6 +24,8 @@ Every option `aeris sweep` does not know (`--updates`, `--dataset`, `--scenario`
 …) is passed to `aeris train four-rooms`. Each seed trains and then runs its analyses: the tabular
 policy analysis, the zero-shot task suite, representations, network features, and, for the full
 oracle dataset, the FB occupancy diagnostic. See [dataset scenarios](fb_four_rooms.md#dataset-scenarios).
+`--policy-evaluation` adds `aeris analysis policy-evaluation` (fixed policies' learned Q-values,
+a few minutes per seed); see [the dashboard](../dashboard.md#policy-evaluation).
 
 With `--lsf`, one job per seed is submitted as an LSF job array (`--queue hpc`, `--walltime 4:00`,
 `--memory 4GB` by default; each job uses one core, as torch runs single-threaded). The generated job

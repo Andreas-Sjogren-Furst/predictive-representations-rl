@@ -6,7 +6,12 @@ import pytest
 
 pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest
-from test_panels import add_network_features, add_representations, populate
+from test_panels import (
+    add_network_features,
+    add_policy_evaluation,
+    add_representations,
+    populate,
+)
 
 from aeris.dashboard import APP_PATH
 from conftest import synthetic_suite_report
@@ -15,6 +20,7 @@ from conftest import synthetic_suite_report
 def test_app_renders_built_in_layouts_and_saves_edits(tmp_path, four_rooms_run, monkeypatch):
     add_representations(four_rooms_run("first"))
     add_network_features(four_rooms_run("first"))
+    add_policy_evaluation(four_rooms_run("first"))
     four_rooms_run("first").write_report(synthetic_suite_report())
     populate(four_rooms_run("first"))
     populate(four_rooms_run("second"))
@@ -46,7 +52,16 @@ def test_app_renders_built_in_layouts_and_saves_edits(tmp_path, four_rooms_run, 
     at.sidebar.multiselect[0].set_value(["second"]).run()  # a run without network features
     assert not at.exception
     assert any("aeris analysis features" in box.value for box in at.info)
+    at.sidebar.multiselect[0].set_value(["second", "first"]).run()  # only "first" has features
+    labels = [box.label for box in at.selectbox]
+    assert labels.count("Layer") == 1  # the shared picker comes from a run that has the data
     at.sidebar.multiselect[0].set_value(["first"]).run()
+
+    at.sidebar.selectbox[0].set_value("Policy evaluation").run()
+    assert not at.exception
+    assert len(at.get("plotly_chart")) == 4, "maps, scatter, coverage and training"
+    labels = [box.label for box in at.selectbox]
+    assert labels.count("Fixed policy") == 1 and labels.count("Reward (task)") == 1  # shared
 
     at.sidebar.selectbox[0].set_value("Behaviour").run()
     assert not at.exception

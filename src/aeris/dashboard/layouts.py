@@ -118,6 +118,16 @@ BUILT_IN = (
         ),
     ),
     Layout(
+        name="Policy evaluation",
+        shared={"policy": None, "task": None},  # one fixed policy and one reward for the page
+        panels=(
+            PanelSpec(panel="policy_q_maps", width=2),
+            PanelSpec(panel="policy_q_scatter"),
+            PanelSpec(panel="dataset_coverage"),
+            PanelSpec(panel="policy_q_training"),
+        ),
+    ),
+    Layout(
         name="Network",
         shared={"layer": None, "condition": None},  # one layer and one z for every panel
         panels=(

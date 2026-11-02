@@ -5,7 +5,12 @@ import json
 import numpy as np
 import pytest
 
-from conftest import synthetic_network_features, synthetic_representations, synthetic_suite_report
+from conftest import (
+    synthetic_network_features,
+    synthetic_policy_evaluation,
+    synthetic_representations,
+    synthetic_suite_report,
+)
 
 pytest.importorskip("plotly")
 from aeris.analysis.goal_policy import build_goal_oracle
@@ -37,6 +42,11 @@ def add_representations(run, seed=0):
 def add_network_features(run, seed=0):
     features = synthetic_network_features(seed=seed)
     run.write_arrays(features.ARTIFACT_NAME, *features.to_arrays())
+
+
+def add_policy_evaluation(run):
+    evaluation = synthetic_policy_evaluation()
+    run.write_arrays(evaluation.ARTIFACT_NAME, *evaluation.to_arrays())
 
 
 def populate(run):
@@ -567,3 +577,23 @@ def test_network_panels_read_any_layer(four_rooms_run):
     assert isinstance(alignment.render(runs[:1], options), Message)
     missing = PANELS["feature_pca"].missing([populate(four_rooms_run("bare"))])
     assert missing is not None and "aeris analysis features" in missing
+
+
+def test_policy_panels_compare_learned_exact_and_dataset_q(four_rooms_run):
+    run = four_rooms_run()
+    add_policy_evaluation(run)
+    data = populate(run)
+    maps = PANELS["policy_q_maps"]
+    options = maps.resolve_options([data], {})
+    assert options["policy"] == "optimal · reach_9_9" and options["task"] == "reach_9_9"
+    figure = maps.render([data], options)
+    assert [a.text for a in figure.layout.annotations][:3] == ["exact", "dataset only", "learned"]
+    assert "dataset alone determines" in figure.layout.title.text
+    uniform = maps.render([data], {**options, "policy": "uniform random"})
+    assert "determines 0/68 states" in uniform.layout.title.text  # it may always go left
+    scatter = PANELS["policy_q_scatter"]
+    points = scatter.render([data], scatter.resolve_options([data], {"task": "room_top_left"}))
+    names = {trace.name for trace in points.data}
+    assert {"↑", "← (not in data)"} <= names and "best action" in points.layout.title.text
+    training = PANELS["policy_q_training"].render([data], {})
+    assert [t.name for t in training.data] == ["uniform random", "optimal · reach_9_9"]

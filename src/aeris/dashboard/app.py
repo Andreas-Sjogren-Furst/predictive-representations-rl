@@ -84,7 +84,10 @@ def draw_stats(output: Stats, per_row: int = 4) -> None:
 
 
 def panel_runs_for(panel: Any, runs: Sequence[RunData]) -> list[RunData]:
-    return list(runs[:1]) if panel.scope == "run" else list(runs)
+    """A single-run panel's default run: the first selected run that has its data."""
+    if panel.scope != "run":
+        return list(runs)
+    return [next((run for run in runs if panel.missing([run]) is None), runs[0])]
 
 
 def shared_pickers(layout: Layout, runs: Sequence[RunData]) -> dict[str, Any]:
@@ -133,8 +136,7 @@ def render_panel(
         if panel.scope == "run":
             labels = [run.label for run in runs]
             saved = options.get(RUN_OPTION)
-            # By default, the first selected run that has this panel's data.
-            ready = next((run.label for run in runs if panel.missing([run]) is None), labels[0])
+            ready = panel_runs_for(panel, runs)[0].label
             chosen: str = saved if isinstance(saved, str) and saved in labels else ready
             panel_runs = [runs[labels.index(chosen)]]
         else:

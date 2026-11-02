@@ -29,6 +29,7 @@ from aeris.workflows._runtime import use_single_cpu_thread
 if TYPE_CHECKING:
     from aeris.agents.fb.agent import DiscreteFBAgent
     from aeris.analysis.network_features import NetworkFeatures
+    from aeris.analysis.policy_evaluation import PolicyEvaluation
 
 # Run conventions shared by training (four_rooms_training.py) and the analyses here:
 # each evaluation label names a policy snapshot and the checkpoint id it was evaluated as.
@@ -354,12 +355,7 @@ def export_network_features(run_ref: RunRef, *, goal: Position | None = None) ->
     goal_task = run.env.goal_task(goal).task_id
 
     def inferred(task_id: str) -> np.ndarray:
-        rewards = run.env.state_rewards(suite[task_id])
-        evidence = [
-            (obs, float(rewards[i]))
-            for obs, i in zip(dataset.observations, sample_states, strict=True)
-        ]
-        return agent.infer_condition(suite[task_id], evidence).cpu().numpy()
+        return _inferred_condition(run, agent, dataset, sample_states, suite[task_id])
 
     def b(position: Position) -> np.ndarray:
         return agent.goal_condition(run.env.observation_for(position)).cpu().numpy()
@@ -416,6 +412,127 @@ def export_network_features(run_ref: RunRef, *, goal: Position | None = None) ->
         features=features,
     )
     run.store.write_arrays(NetworkFeatures.ARTIFACT_NAME, *result.to_arrays())
+    return result
+
+
+def _inferred_condition(
+    run: FourRoomsRun,
+    agent: DiscreteFBAgent,
+    dataset: TransitionFile,
+    sample_states: Sequence[int],
+    task: TaskSpec,
+) -> np.ndarray:
+    """z inferred from the run's own data relabelled with the task's reward (dataset_rewards)."""
+    rewards = run.env.state_rewards(task)
+    evidence = [
+        (obs, float(rewards[i])) for obs, i in zip(dataset.observations, sample_states, strict=True)
+    ]
+    return agent.infer_condition(task, evidence).cpu().numpy()
+
+
+def export_policy_evaluation(
+    run_ref: RunRef,
+    *,
+    tasks: Sequence[str] | None = None,
+    updates: int = 20_000,
+    batch_size: int = 128,
+    seed: int = 0,
+) -> PolicyEvaluation:
+    """Learn the Q-values of fixed policies on the run's own data, with its B frozen (torch).
+
+    Policies: uniform random (task-free), and per task (default: the run's training
+    goal) the optimal policy and the trained FB's own greedy policy for the task's
+    inferred z. Uniform and optimal get a new F^pi trained for ``updates`` steps on the
+    run's dataset; FB's own policy uses the run's F(s, a, z), with no training. Saves
+    ``analysis/policy_evaluation_v1.npz``, which the dashboard's policy panels read.
+    """
+    from aeris.agents.fb.batch import FBTransitionSampler
+    from aeris.agents.fb.policy_evaluation import FBPolicyEvaluator
+    from aeris.analysis.policy_evaluation import (
+        GREEDY_FB,
+        OPTIMAL,
+        UNIFORM,
+        EvaluatedPolicy,
+        PolicyEvaluation,
+    )
+    from aeris.analysis.task_scores import optimal_solution
+    from aeris.environments.four_rooms_tasks import task_suite
+
+    require_int("updates", updates, minimum=1)
+    require_int("batch_size", batch_size, minimum=1)
+    use_single_cpu_thread()
+    run = open_four_rooms_run(run_ref)
+    agent = _load_checkpoint(run)
+    dynamics = run.env.tabular_dynamics()
+    s, a = dynamics.num_states, dynamics.num_actions
+    suite = {task.task_id: task for task in task_suite("four_rooms_v1").tasks}
+    chosen = list(tasks) if tasks else [run.env.goal_task(run.goal).task_id]
+    unknown = [task for task in chosen if task not in suite]
+    if unknown:
+        raise ValueError(f"unknown suite tasks: {', '.join(unknown)}")
+    dataset = _training_data(run, "policy evaluation")
+    sample_states = [dynamics.index_of(run.env.position_of(obs)) for obs in dataset.observations]
+    covered = np.zeros((s, a), dtype=bool)
+    covered[sample_states, dataset.actions] = True
+    density = np.bincount(sample_states, minlength=s) / len(sample_states)
+    observations = np.stack([run.env.observation_for(state) for state in dynamics.states])
+    unit_state = {int(observations[i].argmax()): i for i in range(s)}
+    gamma = agent.config.gamma
+
+    policies: list[EvaluatedPolicy] = [EvaluatedPolicy("uniform random", UNIFORM, None)]
+    tables: list[np.ndarray] = [np.full((s, a), 1.0 / a)]
+    for task_id in chosen:
+        best = optimal_solution(dynamics, run.env.state_rewards(suite[task_id]), gamma=gamma)
+        mask = best.optimal_actions.astype(np.float64)
+        policies.append(EvaluatedPolicy(f"optimal · {task_id}", OPTIMAL, task_id))
+        tables.append(mask / mask.sum(axis=1, keepdims=True))
+
+    transitions = list(dataset.iter_transitions())
+    forward: list[np.ndarray] = []
+    losses: list[np.ndarray] = []
+    points = 100
+    for index, table in enumerate(tables):
+        learner = FBPolicyEvaluator(agent.config, agent.backward_network, seed=seed + index)
+        sampler = FBTransitionSampler(transitions, batch_size=batch_size, seed=seed)
+        logged, every = [], max(1, updates // points)
+        for step in range(1, updates + 1):
+            batch = sampler.next_batch()
+            nexts = [unit_state[int(u)] for u in batch.next_observations.argmax(axis=1)]
+            loss = learner.update(
+                batch.observations,
+                batch.actions,
+                batch.next_observations,
+                batch.comparison_observations,
+                table[nexts],
+            )
+            if step % every == 0:
+                logged.append(loss)
+        forward.append(learner.forward_vectors(observations).cpu().numpy())
+        losses.append(np.array(logged[:points] + [np.nan] * (points - len(logged[:points]))))
+
+    for task_id in chosen:
+        z = _inferred_condition(run, agent, dataset, sample_states, suite[task_id])
+        greedy = agent.action_values(observations, z).cpu().numpy().argmax(axis=1)
+        policies.append(EvaluatedPolicy(f"FB greedy · {task_id}", GREEDY_FB, task_id))
+        tables.append(np.eye(a)[greedy])
+        forward.append(agent.forward_map(observations, z).cpu().numpy())
+        losses.append(np.full(points, np.nan))
+
+    result = PolicyEvaluation(
+        run_id=run.manifest.run_id,
+        checkpoint=run.store.checkpoint_path.name,
+        gamma=gamma,
+        updates=updates,
+        states=dynamics.states,
+        policies=tuple(policies),
+        tables=np.stack(tables),
+        forward=np.stack(forward),
+        backward=agent.backward_features(observations).cpu().numpy(),
+        state_density=density,
+        covered=covered,
+        losses=np.stack(losses),
+    )
+    run.store.write_arrays(PolicyEvaluation.ARTIFACT_NAME, *result.to_arrays())
     return result
 
 

@@ -16,6 +16,7 @@ from aeris.dashboard.panels.network import (
     StateSensitivity,
     ZSensitivity,
 )
+from aeris.dashboard.panels.policy_q import PolicyQMaps, PolicyQScatter, PolicyQTraining
 from aeris.dashboard.panels.representations import (
     ActionValues,
     BSpectrum,
@@ -69,6 +70,9 @@ PANELS: dict[str, Panel] = {
         ZSensitivity(),
         LayerAlignment(),
         DatasetCoverage(),
+        PolicyQMaps(),
+        PolicyQScatter(),
+        PolicyQTraining(),
     )
 }
 

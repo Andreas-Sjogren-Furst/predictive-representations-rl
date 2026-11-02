@@ -214,3 +214,27 @@ def test_feature_extraction_matches_the_networks():
     assert np.allclose(found["B.out"], a.backward_features(obs).numpy(), atol=1e-6)
     assert np.allclose(found["Q"], a.action_values(obs, z).numpy(), atol=1e-5)
     assert (found["B.fc2"] >= 0).all()  # after the ReLU
+
+
+def test_policy_evaluation_trains_f_with_b_frozen():
+    from aeris.agents.fb.policy_evaluation import FBPolicyEvaluator
+
+    a = agent()
+    before = [p.detach().clone() for p in a.backward_network.parameters()]
+    learner = FBPolicyEvaluator(a.config, a.backward_network, seed=1)
+    b = batch()
+    uniform = np.full((len(b.actions), 3), 1 / 3)
+    losses = [
+        learner.update(
+            b.observations, b.actions, b.next_observations, b.comparison_observations, uniform
+        )
+        for _ in range(50)
+    ]
+    assert all(np.isfinite(losses)) and losses[-1] < losses[0]
+    assert learner.forward_vectors(b.observations).shape == (8, 5, 3)
+    assert all(
+        torch.equal(x, y) for x, y in zip(before, a.backward_network.parameters(), strict=True)
+    )
+    assert all(
+        torch.equal(x, y) for x, y in zip(before, learner.backward.parameters(), strict=True)
+    )

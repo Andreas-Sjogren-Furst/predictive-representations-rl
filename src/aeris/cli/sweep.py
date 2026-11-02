@@ -33,6 +33,12 @@ def four_rooms(
     queue: Annotated[str, typer.Option(help="LSF queue.")] = "hpc",
     walltime: Annotated[str, typer.Option(help="LSF wall-clock limit per seed (H:MM).")] = "4:00",
     memory: Annotated[str, typer.Option(help="LSF memory per seed.")] = "4GB",
+    policy_evaluation: Annotated[
+        bool,
+        typer.Option(
+            "--policy-evaluation", help="Also learn fixed policies' Q-values for each seed."
+        ),
+    ] = False,
 ) -> None:
     """Train and analyze NAME for every seed. Extra options go to `aeris train four-rooms`.
 
@@ -46,7 +52,11 @@ def four_rooms(
         if lsf and local:
             raise ValueError("choose either --lsf or --local")
         sweep = SeedSweep(
-            name=name, seeds=parse_seeds(seeds), train_args=tuple(ctx.args), root=root
+            name=name,
+            seeds=parse_seeds(seeds),
+            train_args=tuple(ctx.args),
+            root=root,
+            policy_evaluation=policy_evaluation,
         )
         existing = [str(sweep.run_dir(s)) for s in sweep.seeds if sweep.run_dir(s).exists()]
         if existing:
